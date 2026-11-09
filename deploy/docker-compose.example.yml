@@ -1,37 +1,37 @@
-# teddybridge als Begleitcontainer neben TeddyCloud.
+# teddybridge as a companion container next to TeddyCloud.
 #
-# Variante A (empfohlen): den Dienst "teddybridge" unten in die bestehende docker-compose.yml von TeddyCloud
-# übernehmen. Dann liegen beide im selben Netz, und teddybridge erreicht TeddyCloud direkt unter seinem
-# Dienstnamen (TC_URL=http://teddycloud, ohne Reverse Proxy dazwischen).
+# Option A (recommended): add the "teddybridge" service below to TeddyCloud's existing docker-compose.yml.
+# Both are then in the same network, and teddybridge reaches TeddyCloud directly by its
+# service name (TC_URL=http://teddycloud, no reverse proxy in between).
 #
-# Variante B: eigene Compose-Datei und dem Netz von TeddyCloud beitreten (Abschnitt "networks" unten
-# einkommentieren; Netzname mit `docker network ls` nachsehen, meist <ordner>_default).
+# Option B: a separate compose file that joins TeddyCloud's network (uncomment the "networks" section
+# below; look up the network name with `docker network ls`, usually <folder>_default).
 #
-# Konfiguration: teddybridge.env neben dieser Datei (Vorlage: deploy/teddybridge.env.example), Rechte 600.
-# Im Container gilt mindestens:  TC_URL=http://teddycloud   (Dienstname von TeddyCloud, Port 80 intern)
+# Configuration: teddybridge.env next to this file (template: deploy/teddybridge.env.example), mode 600.
+# Inside the container at least:  TC_URL=http://teddycloud   (TeddyCloud's service name, internal port 80)
 
 services:
   teddybridge:
     image: ghcr.io/urza-lab/teddybridge:latest
-    # build: ./teddybridge          # stattdessen selbst bauen (Ordner mit dem geklonten Repo)
+    # build: ./teddybridge          # build it yourself instead (folder with the cloned repo)
     container_name: teddybridge
     restart: unless-stopped
     env_file: ./teddybridge.env
     ports:
-      - "8085:8085"                 # nur nötig, wenn Caddy/der Browser nicht im selben Docker-Netz ist
+      - "8085:8085"                 # only needed if Caddy/the browser is not in the same Docker network
     volumes:
-      - teddybridge-tmp:/var/tmp    # Arbeitsordner (Downloads), auf Platte statt im RAM
-      # optional Dateiquelle (NAS), immer nur lesend; in der env-Datei dann FS_ROOTS=Hörspiele=/nas/hoerspiele
-      # - /mnt/nas/hoerspiele:/nas/hoerspiele:ro
-    read_only: true                 # Image-Dateisystem schreibgeschützt
+      - teddybridge-tmp:/var/tmp    # work folder (downloads), on disk instead of RAM
+      # optional file source (NAS), always read-only; then in the env file: FS_ROOTS=Audiobooks=/nas/audiobooks
+      # - /mnt/nas/audiobooks:/nas/audiobooks:ro
+    read_only: true                 # image file system read-only
     tmpfs:
       - /tmp:size=64m
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-    # depends_on: [teddycloud]      # in Variante A sinnvoll
+    # depends_on: [teddycloud]      # useful in option A
 
-# Variante B:
+# Option B:
 #    networks: [teddycloud]
 #networks:
 #  teddycloud:

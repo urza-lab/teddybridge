@@ -152,22 +152,25 @@ Notes: restarting the container discards the queue (same as the systemd service)
 
 ## TeddyCloud plugin (optional)
 
-TeddyCloud shows every folder under `/teddycloud/data/www/plugins/` as an entry in its *Plugins* tab. The template `plugin/teddybridge/index.html` opens teddybridge from there. This does **not happen automatically**, not even in the same compose stack: by design, teddybridge only writes to the library through the API, never into TeddyCloud itself.
+The plugin in `plugin/teddybridge/` adds a “teddybridge” entry to TeddyCloud that opens teddybridge. TeddyCloud lists every folder under `/teddycloud/data/www/plugins/` that contains a `plugin.json`. Installing it is a manual step, also in the same compose stack: by design, teddybridge only writes to the library through the API, never into TeddyCloud itself.
 
-The address in the plugin must be the URL at which **the browser** reaches teddybridge, e.g. `https://teddybridge.example.lan/` or `http://<host>:8085/` – not the Docker service name.
+On first use the plugin asks for the address at which **the browser** reaches teddybridge, e.g. `https://teddybridge.example.lan/` or `http://<host>:8085/` (not the Docker service name), and stores it in that browser. “Change address” is shown for 1.5 s before it redirects. To preset the address for all browsers, replace `TEDDYBRIDGE_URL` in `index.html` (see below).
 
 **TeddyCloud in Docker**
 
-The official TeddyCloud compose has its own `plugins` volume for this (`/teddycloud/data/www/plugins`); whatever is there survives TeddyCloud updates. On the Docker host, replace `<host>` with the address of teddybridge:
+The official TeddyCloud compose has its own `plugins` volume for this (`/teddycloud/data/www/plugins`); whatever is there survives TeddyCloud updates. On the Docker host:
 
 ```sh
-mkdir -p /tmp/teddybridge-plugin/teddybridge
-curl -fsSL https://raw.githubusercontent.com/urza-lab/teddybridge/main/plugin/teddybridge/index.html \
-  | sed 's#TEDDYBRIDGE_URL#http://<host>:8085/#g' > /tmp/teddybridge-plugin/teddybridge/index.html
+mkdir -p /tmp/teddybridge-plugin/teddybridge && cd /tmp/teddybridge-plugin/teddybridge
+for f in index.html plugin.json; do
+  curl -fsSLO https://raw.githubusercontent.com/urza-lab/teddybridge/main/plugin/teddybridge/$f
+done
+# optional, preset the address:
+# sed -i 's#TEDDYBRIDGE_URL#http://<host>:8085/#' index.html
 docker cp /tmp/teddybridge-plugin/teddybridge teddycloud:/teddycloud/data/www/plugins/
 ```
 
-`teddycloud` is the container name (`docker ps` shows it). No restart is needed; after reloading the TeddyCloud page, *Plugins* shows the entry “teddybridge”. If the address changes, repeat the commands with the new URL.
+`teddycloud` is the container name (`docker ps` shows it). No restart is needed; after reloading the TeddyCloud page, the entry “teddybridge” appears.
 
 If your own compose lacks the `plugins` volume, a copied plugin would be gone after the next update. In that case mount the folder instead, in the `teddycloud` service:
 
@@ -177,13 +180,13 @@ If your own compose lacks the `plugins` volume, a copied plugin would be gone af
       - ./plugins/teddybridge:/teddycloud/data/www/plugins/teddybridge:ro
 ```
 
-(Write the file with the `curl … | sed …` above to `./plugins/teddybridge/index.html`, then run `docker compose up -d teddycloud`. This briefly restarts TeddyCloud, so not during a running transfer.)
+(Put both files into `./plugins/teddybridge/`, then run `docker compose up -d teddycloud`. This briefly restarts TeddyCloud, so not during a running transfer.)
 
 **TeddyCloud without Docker**
 
-In `plugin/teddybridge/index.html`, replace every `TEDDYBRIDGE_URL` (three times) with the address, e.g. with the `sed` above, and copy the `teddybridge` folder to `<teddycloud-data>/www/plugins/`.
+Copy the folder `plugin/teddybridge` to `<teddycloud-data>/www/plugins/`.
 
-For security reasons teddybridge cannot be embedded in a foreign frame (`frame-ancestors 'none'`). The plugin therefore redirects the whole window; if the browser does not allow that without a click, a button “teddybridge öffnen” (“open teddybridge”) appears.
+For security reasons teddybridge cannot be embedded in a foreign frame (`frame-ancestors 'none'`). The plugin therefore redirects the whole window; if the browser does not allow that without a click, an “Open teddybridge” button stays. The plugin follows the browser language (German or English).
 
 ## Tests
 

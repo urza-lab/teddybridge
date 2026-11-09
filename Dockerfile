@@ -1,11 +1,11 @@
-# teddybridge – Container-Image (Begleitcontainer neben TeddyCloud)
+# teddybridge – container image (companion container next to TeddyCloud)
 FROM python:3.13-slim
 LABEL org.opencontainers.image.title="teddybridge" \
-      org.opencontainers.image.description="Audiobookshelf, Navidrome und NAS nach TeddyCloud (TAF)" \
+      org.opencontainers.image.description="Audiobookshelf, Navidrome and NAS to TeddyCloud (TAF)" \
       org.opencontainers.image.source="https://github.com/urza-lab/teddybridge" \
       org.opencontainers.image.licenses="AGPL-3.0-only"
 
-# ffmpeg: m4b an Kapiteln schneiden, andere Formate als MP3 zusammenfügen (optional, aber im Image immer dabei)
+# ffmpeg: cut m4b at chapters, merge formats other than MP3 (optional, but always included in the image)
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg \
  && rm -rf /var/lib/apt/lists/*
@@ -19,7 +19,7 @@ COPY app/ app/
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 LISTEN=0.0.0.0:8085
 USER teddybridge
 EXPOSE 8085
-# /var/tmp: Arbeitsordner für Downloads (gross, darum nicht im RAM) – im Compose als Volume
+# /var/tmp: work folder for downloads (large, hence not in RAM) – a volume in compose
 VOLUME ["/var/tmp"]
 HEALTHCHECK --interval=60s --timeout=10s --start-period=20s \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8085/login', timeout=8)" || exit 1
