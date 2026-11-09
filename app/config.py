@@ -1,6 +1,8 @@
 """Konfiguration aus Umgebungsvariablen (systemd: EnvironmentFile=/etc/teddybridge/teddybridge.env)."""
 import ipaddress
 import os
+import re
+from urllib.parse import urlsplit
 from dataclasses import dataclass
 
 from . import fs, pwhash
@@ -26,6 +28,7 @@ class Config:
     fs_roots: tuple = ()  # ((Name, Pfad), ...) – Dateiquelle, z. B. NAS per NFS/SMB
     tc_base_extra: tuple = ()  # weitere Ordner, die nur auf vorhandene TAFs durchsucht werden (nie beschrieben)
     ui_lang: str = ""  # "de"/"en" = fest; leer = Browser-Sprache, umschaltbar in der Oberfläche
+    frame_ancestors: tuple = ()  # Origins, die teddybridge in einem Rahmen zeigen dürfen (z. B. TeddyCloud)
 
     @property
     def tc_scan_bases(self):
@@ -119,6 +122,21 @@ def load() -> Config:
         ui_lang = ""
     if ui_lang not in ("", "de", "en"):
         raise SystemExit("UI_LANG: de, en oder leer (= Sprache des Browsers, umschaltbar)")
+    frames = []
+    for x in os.environ.get("FRAME_ANCESTORS", "").replace(" ", ",").split(","):
+        x = x.strip().rstrip("/")
+        if not x:
+            continue
+        u = urlsplit(x)
+        if (u.scheme not in ("http", "https") or not u.hostname or u.path or u.query or u.fragment
+                or u.username or u.password or "*" in x or not re.fullmatch(r"[A-Za-z0-9.:\[\]/-]+", x)):
+            raise SystemExit("FRAME_ANCESTORS: Adressen wie http://teddycloud.example oder http://192.0.2.10:8080, "
+                             "ohne Pfad, mit Komma getrennt")
+        try:
+            u.port
+        except ValueError:
+            raise SystemExit("FRAME_ANCESTORS: ungültiger Port") from None
+        frames.append(f"{u.scheme}://{u.netloc.lower()}")
     auth = os.environ.get("TC_AUTH", "").strip()
     tc_auth = tuple(auth.split(":", 1)) if ":" in auth else None
     listen = os.environ.get("LISTEN", "0.0.0.0:8085")
@@ -142,4 +160,5 @@ def load() -> Config:
         fs_roots=fs_roots,
         tc_base_extra=tuple(extra),
         ui_lang=ui_lang,
+        frame_ancestors=tuple(dict.fromkeys(frames)),
     )

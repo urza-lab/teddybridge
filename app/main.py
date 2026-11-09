@@ -75,7 +75,7 @@ elif CFG.ui_auth:
     log.warning("Login aktiv, aber Passwort im Klartext (UI_PASS). Besser: UI_PASS_HASH, erzeugen mit "
                 "venv/bin/python -m app.pwhash")
 else:
-    log.warning("Login nicht konfiguriert (UI_USER/UI_PASS_HASH): Oberfläche ohne Login")
+    log.info("Kein Login konfiguriert (UI_USER/UI_PASS_HASH leer): Oberfläche ohne Login")
 
 
 SESSION_COOKIE = "tb_session"
@@ -157,15 +157,20 @@ async def require_login(request: Request, call_next):
     return RedirectResponse("/login", status_code=303)
 
 
+# Einbetten in einen Rahmen nur, wenn FRAME_ANCESTORS gesetzt ist (z. B. TeddyCloud-Plugin), sonst nie (Clickjacking).
+FRAMES = " ".join(CFG.frame_ancestors) or "'none'"
 CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
-       "connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'")
+       f"connect-src 'self'; form-action 'self'; frame-ancestors {FRAMES}; base-uri 'none'; object-src 'none'")
+if CFG.frame_ancestors:
+    log.info("Einbetten erlaubt für: %s", ", ".join(CFG.frame_ancestors))
 
 
 @app.middleware("http")  # nach require_login registriert = äussere Schicht, gilt also auch für 401/Weiterleitungen
 async def security_headers(request: Request, call_next):
     resp = await call_next(request)
     resp.headers.setdefault("Content-Security-Policy", CSP)
-    resp.headers.setdefault("X-Frame-Options", "DENY")
+    if not CFG.frame_ancestors:  # X-Frame-Options kennt keine Liste; mit FRAME_ANCESTORS gilt nur die CSP
+        resp.headers.setdefault("X-Frame-Options", "DENY")
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "same-origin")
     return resp

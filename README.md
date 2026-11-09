@@ -15,7 +15,7 @@ A web UI to browse audiobooks, radio plays and music from **Audiobookshelf**, **
 | **Target** | The TeddyCloud library. teddybridge only creates files. It deletes nothing but its own temporary `_src_*` folders – and a TAF that the same run created itself and that is provably incomplete after TeddyCloud aborted (before the automatic retry). |
 | **Tech** | Python 3.11+, FastAPI/uvicorn, httpx, a single HTML page with vanilla JS and no build step. No database. Optional ffmpeg (m4b chapters, merging formats other than MP3). |
 | **Deployment** | Docker container (prebuilt image `ghcr.io/urza-lab/teddybridge`) or systemd service, both hardened (templates in `deploy/`). Meant for a trusted home network, optionally behind an internal reverse proxy with HTTPS. **Do not expose it to the internet.** |
-| **Security** | Login with scrypt hash and HttpOnly session cookie. Credentials for ABS, Navidrome and TeddyCloud stay in the backend. Security headers (CSP, `frame-ancestors 'none'`). No known vulnerabilities in dependencies (pip-audit, as of 2026-11-08). See [Security](#security). |
+| **Security** | Login with scrypt hash and HttpOnly session cookie. Credentials for ABS, Navidrome and TeddyCloud stay in the backend. Security headers (CSP; framing only by origins listed in `FRAME_ANCESTORS`). No known vulnerabilities in dependencies (pip-audit, as of 2026-11-08). See [Security](#security). |
 
 ## How it works
 
@@ -75,14 +75,14 @@ Plus **at least one source**; several can be combined, the UI then shows tabs. A
 | Navidrome | `ND_URL`, `ND_USER`, `ND_PASS` | Address and credentials of a dedicated user **without** admin rights |
 | File source | `FS_ROOTS` | `Name=/path`, several separated by `;`, e.g. `Audiobooks=/mnt/nas/audiobooks;Music=/mnt/nas/music` (see [File source](#file-source-nas)) |
 
-### Strongly recommended
+### Login (optional)
 
 | Variable | Meaning |
 |---|---|
 | `UI_USER` | User name for the login |
 | `UI_PASS_HASH` | Password hash, created with `venv/bin/python -m app.pwhash` (asks for the password twice, min. 8 characters). Format `scrypt:n:r:p:salt:hash`, deliberately without `$`. |
 
-Both empty = **no login** (warning in the log). Only one set or invalid hash = start aborted. A plain-text `UI_PASS` is still accepted (with a warning); the hash takes precedence.
+Both empty = **no login** (note in the log). That is fine if only trusted people can reach teddybridge's port, e.g. a home network. Note that protecting TeddyCloud with a password does **not** protect teddybridge: its port (8085) is reached directly, also when it is shown inside TeddyCloud. Only one set or invalid hash = start aborted. A plain-text `UI_PASS` is still accepted (with a warning); the hash takes precedence.
 
 **Forgot the password?** Create a new hash with `python -m app.pwhash` (Docker: `docker compose run --rm -it teddybridge python -m app.pwhash`), put it into the env file and restart the service or container.
 
@@ -96,6 +96,7 @@ Both empty = **no login** (warning in the log). Only one set or invalid hash = s
 | `LISTEN` | `0.0.0.0:8085` | Address and port |
 | `TRUSTED_PROXIES` | – | IP(s) of the reverse proxy, comma-separated (single IPs only). Then `X-Forwarded-For/-Proto` are honored: real client IP in the log, cookie with `Secure` on HTTPS. |
 | `DISCORD_WEBHOOK` | – | Discord webhook URL: message per job (done/error) and summary per batch. Read only at startup. |
+| `FRAME_ANCESTORS` | – | Address(es) of TeddyCloud as the browser sees it, e.g. `http://teddycloud.example` or `http://192.0.2.10` (scheme, host, optional port, no path; comma-separated). Allows the [plugin](#teddycloud-plugin-optional) to show teddybridge **inside** TeddyCloud. Empty: teddybridge cannot be framed at all. |
 | `UI_LANG` | – | `en` or `de` pins the language of the UI, error messages, Discord messages and folder names (e.g. `Collections`/`Sammlungen`); the language selector is hidden. Empty: browser language (English if it is neither), switchable in the header; a job uses the language of the browser that queued it. |
 
 No comments after values: systemd treats them as part of the value.
@@ -154,7 +155,11 @@ Notes: restarting the container discards the queue (same as the systemd service)
 
 The plugin in `plugin/teddybridge/` adds a “teddybridge” entry to TeddyCloud that opens teddybridge. TeddyCloud lists every folder under `/teddycloud/data/www/plugins/` that contains a `plugin.json`. Installing it is a manual step, also in the same compose stack: by design, teddybridge only writes to the library through the API, never into TeddyCloud itself.
 
-On first use the plugin asks for the address at which **the browser** reaches teddybridge, e.g. `https://teddybridge.example.lan/` or `http://<host>:8085/` (not the Docker service name), and stores it in that browser. “Change address” is shown for 1.5 s before it redirects. To preset the address for all browsers, replace `TEDDYBRIDGE_URL` in `index.html` (see below).
+On first use the plugin asks for the address at which **the browser** reaches teddybridge, e.g. `https://teddybridge.example.lan/` or `http://<host>:8085/` (not the Docker service name), and stores it in that browser. To change it later, open the plugin page with `?setup` (`…/plugins/teddybridge/index.html?setup`), or click “Change address” while it opens. To preset the address for all browsers, replace `TEDDYBRIDGE_URL` in `index.html` (see below).
+
+**Inside TeddyCloud or in its own window.** teddybridge is shown inside TeddyCloud if `FRAME_ANCESTORS` contains TeddyCloud's address as the browser sees it, e.g. `FRAME_ANCESTORS=http://192.0.2.10` when TeddyCloud is at `http://192.0.2.10` and teddybridge at `http://192.0.2.10:8085`. Otherwise the plugin redirects the whole window to teddybridge (after about 2–3 s).
+
+With login, embedding needs both on the **same site**: the same host name or IP with different ports, or subdomains of the same registered domain (`tc.example.com` / `tb.example.com`). The session cookie is `SameSite=Strict`, so browsers do not send it to a framed teddybridge on another site (e.g. different IPs, or `teddycloud.lan` / `teddybridge.lan`). teddybridge then shows a hint with a link to open it in its own window. Without login this restriction does not apply.
 
 **TeddyCloud in Docker**
 
@@ -186,7 +191,7 @@ If your own compose lacks the `plugins` volume, a copied plugin would be gone af
 
 Copy the folder `plugin/teddybridge` to `<teddycloud-data>/www/plugins/`.
 
-For security reasons teddybridge cannot be embedded in a foreign frame (`frame-ancestors 'none'`). The plugin therefore redirects the whole window; if the browser does not allow that without a click, an “Open teddybridge” button stays. The plugin follows the browser language (German or English).
+If the browser does not allow the redirect without a click, an “Open teddybridge” button stays. The plugin follows the browser language (German or English).
 
 ## Tests
 
@@ -211,7 +216,7 @@ teddybridge is built for a **trusted local network**. Whoever can log in may rea
 - **Login:** scrypt (n=2¹⁵, r=8, p=1, 16-byte salt). Constant-time comparison; the password is checked even for a wrong user name. 1 s delay and a log entry with client IP per failed attempt.
 - **Session:** 256-bit random token in a cookie with `HttpOnly`, `SameSite=Strict` and `Secure` on HTTPS. Only the SHA-256 of the token is stored server-side, max. 200 sessions. Logout invalidates the session server-side. `/api/*` answers 401 without login.
 - **Basic Auth** for scripts, without a browser popup.
-- **Security headers:** strict CSP (own origin only, no external scripts), `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`. OpenAPI/docs are disabled, no `Server` header.
+- **Security headers:** strict CSP (own origin only, no external scripts), `frame-ancestors 'none'` and `X-Frame-Options: DENY` (with `FRAME_ANCESTORS`: only the listed origins, no `X-Frame-Options`), `nosniff`, `Referrer-Policy`. OpenAPI/docs are disabled, no `Server` header.
 - **Injection:** All IDs that end up in source URLs are validated with an allow-list regex. Target and file names are sanitized (no `..`, no control characters, never `_src_`). The frontend builds DOM nodes with `textContent` and never uses `innerHTML`, so titles and file names cannot inject HTML.
 - **File source:** IDs are base64url of the relative path. `..`, absolute paths, NUL and symlinks leading out of the share are rejected, and checked again when copying. Regular files only, covers max. 10 MB, search limited (20,000 folders, 8 s).
 - **Deleting in TeddyCloud** only inside its own `_src_*` folder; the code checks this before every delete call. Single exception: the TAF the same run has just created, if it is provably incomplete after TeddyCloud aborted (invalid header or wrong chapter count, size no longer changing) – before the retry or when giving up. A TAF that existed before the run is never deleted.
@@ -228,7 +233,8 @@ teddybridge is built for a **trusted local network**. Whoever can log in may rea
 | Risk | Rating | Recommendation |
 |---|---|---|
 | No built-in TLS: without a reverse proxy, password and cookie cross the LAN in plain text | medium | Put an internal reverse proxy with HTTPS in front (`TRUSTED_PROXIES`) |
-| Without `UI_USER`/`UI_PASS_HASH`, anyone on the network can start jobs | medium | Always set a login |
+| Without `UI_USER`/`UI_PASS_HASH`, anyone on the network can start jobs | medium | Set a login unless only trusted people reach the port |
+| With `FRAME_ANCESTORS`, the listed origins can frame teddybridge (clickjacking from there) | low | List only TeddyCloud's own address |
 | Failed attempts are delayed per request, but parallel attempts are not limited; no lockout | low (LAN) | Do not expose to the internet; rate-limit in the proxy if needed |
 | Navidrome login per the Subsonic protocol (`md5(password+salt)`) | low | Use a dedicated Navidrome user with its own password |
 | `TC_AUTH` is sent to TeddyCloud via Basic Auth, unencrypted over `http://` | low (LAN) | Reach TeddyCloud via HTTPS if possible |

@@ -16,20 +16,37 @@ input,button{font:inherit;color:var(--fg);background:var(--card);border:1px soli
 input:focus{outline:2px solid var(--acc);outline-offset:-1px}
 button{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600;cursor:pointer;margin-top:4px}
 .err{color:var(--err);margin:0}
+.hint{margin:0;font-size:14px;color:var(--mut)}
+.hint a{color:var(--acc)}
 </style>
 </head>
 <body>
 <form method="post" action="/login" autocomplete="on">
   <h1>teddybridge</h1>
   <p class="err" id="err" hidden>Benutzer oder Passwort falsch.</p>
+  <p class="hint" id="frameHint" hidden>Die Anmeldung klappt in TeddyCloud nicht, weil der Browser das Cookie im Rahmen blockiert (TeddyCloud und teddybridge laufen unter verschiedenen Adressen). <a href="/" target="_top">teddybridge im eigenen Fenster öffnen</a></p>
   <label>Benutzer<input name="username" id="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus></label>
   <label>Passwort<input name="password" id="password" type="password" autocomplete="current-password" required></label>
   <button type="submit">Anmelden</button>
 </form>
 <script>
+// Im Rahmen (TeddyCloud-Plugin): melden, dass teddybridge geladen ist; das Plugin zeigt dann den Rahmen statt umzuleiten.
+if (window.parent !== window) { try { parent.postMessage({teddybridge: 'ready'}, '*'); } catch (e) { /* egal */ } }
 if(new URLSearchParams(location.search).has('fehler')) document.getElementById('err').hidden=false;
+// Im Rahmen ohne Fehlermeldung wieder hier gelandet: Session-Cookie wurde nicht mitgeschickt (fremde Site, SameSite=Strict).
+if (window.parent !== window) {
+  try {
+    const t = +sessionStorage.getItem('tb_login_try'); sessionStorage.removeItem('tb_login_try');
+    if (t && Date.now() - t < 15000 && document.getElementById('err').hidden) document.getElementById('frameHint').hidden = false;
+  } catch (e) { /* ohne Speicher kein Hinweis */ }
+  document.querySelector('form').addEventListener('submit', () => { try { sessionStorage.setItem('tb_login_try', Date.now()); } catch (e) {} });
+}
 if(document.documentElement.lang==='en'){
-  const EN={'Benutzer oder Passwort falsch.':'Wrong user name or password.','Benutzer':'User','Passwort':'Password','Anmelden':'Log in'};
+  const EN={'Benutzer oder Passwort falsch.':'Wrong user name or password.',
+    'Die Anmeldung klappt in TeddyCloud nicht, weil der Browser das Cookie im Rahmen blockiert (TeddyCloud und teddybridge laufen unter verschiedenen Adressen).':
+    'Logging in inside TeddyCloud does not work because the browser blocks the cookie in the frame (TeddyCloud and teddybridge run on different sites).',
+    'teddybridge im eigenen Fenster öffnen':'Open teddybridge in its own window',
+    'Benutzer':'User','Passwort':'Password','Anmelden':'Log in'};
   const w=document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   for(let n; (n=w.nextNode());){ const k=n.nodeValue.trim(); if(EN[k]) n.nodeValue=n.nodeValue.replace(k, EN[k]); }
   document.title='teddybridge – Log in';

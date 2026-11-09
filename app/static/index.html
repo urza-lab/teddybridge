@@ -122,6 +122,9 @@ h3.sub{margin:22px 0 8px;font-size:15px;color:var(--mut)}
   <div id="jobs"></div>
 </div>
 <script>
+// Im Rahmen (TeddyCloud-Plugin): melden, dass teddybridge geladen ist; das Plugin zeigt dann den Rahmen statt umzuleiten.
+if (window.parent !== window) { try { parent.postMessage({teddybridge: 'ready'}, '*'); } catch (e) { /* egal */ } }
+try { sessionStorage.removeItem('tb_login_try'); } catch (e) { /* egal */ }
 const $ = s => document.querySelector(s);
 const LANG = document.documentElement.lang==='en' ? 'en' : 'de';
 const LANG_FIXED = document.documentElement.dataset.langFixed==='1';

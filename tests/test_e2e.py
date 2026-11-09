@@ -799,6 +799,29 @@ print("RESULT", '<html lang="de" data-lang-fixed="1">' in h, c.get("/api/config"
         r = subprocess.run([PY, "-c", probe], cwd=ROOT, env=penv, capture_output=True, text=True, timeout=60)
         check("RESULT True True" in r.stdout, f"UI_LANG=de: fest deutsch, ohne Auswahl ({r.stdout[-60:]}{r.stderr[-200:]})")
 
+        print("Einbetten (FRAME_ANCESTORS)")
+        check(cfg_err().frame_ancestors == (), "FRAME_ANCESTORS leer: kein Einbetten")
+        fa = cfg_err(FRAME_ANCESTORS="http://TeddyCloud.example/, https://192.0.2.10:8443 http://teddycloud.example")
+        check(fa.frame_ancestors == ("http://teddycloud.example", "https://192.0.2.10:8443"), f"FRAME_ANCESTORS normalisiert ({getattr(fa, 'frame_ancestors', fa)})")
+        for bad in ("*", "teddycloud.example", "http://x/pfad", "javascript:alert(1)", "http://x;script-src *",
+                    "http://u:p@x", "http://x:99999", "https://*.example"):
+            check(isinstance(cfg_err(FRAME_ANCESTORS=bad), str), f"FRAME_ANCESTORS ungültig abgelehnt: {bad}")
+        probe = r'''
+from fastapi.testclient import TestClient
+from app import main
+c = TestClient(main.app)
+for path in ("/", "/login", "/api/config"):
+    h = c.get(path, follow_redirects=False).headers
+    print("RESULT", path, "frame-ancestors http://tc.example:8080;" in h["content-security-policy"], "x-frame-options" in h)
+'''
+        penv = dict(env, FRAME_ANCESTORS="http://tc.example:8080", UI_PASS=UI_PW, UI_PASS_HASH="", LISTEN="127.0.0.1:1")
+        r = subprocess.run([PY, "-c", probe], cwd=ROOT, env=penv, capture_output=True, text=True, timeout=60)
+        check(r.stdout.count("True False") == 3, f"FRAME_ANCESTORS gesetzt: CSP erlaubt nur diese Adresse, kein X-Frame-Options "
+                                                 f"({r.stdout[-120:]}{r.stderr[-200:]})")
+        pg = c.get("/").text
+        check("parent.postMessage({teddybridge: 'ready'}, '*')" in pg and "parent.postMessage" in httpx.get(
+              f"http://127.0.0.1:{APP_P}/login").text, "Seiten melden sich im Rahmen (Plugin)")
+
         print("Regeln")
         abslog = httpx.get(f"http://127.0.0.1:{ABS_P}/_mock/log").json()
         check(all(e["method"] == "GET" for e in abslog), "ABS: nur GET-Aufrufe")
