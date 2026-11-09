@@ -12,10 +12,11 @@ import time
 import urllib.parse
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from . import config, pwhash
+from . import config, i18n, pwhash
+from .i18n import t
 from .clients import Abs, ApiError, Nd, Tc, check_id
 from .fs import Fs
 from .worker import MAX_FILES, Queue, clean_folder, id8, markers, scan_tree, series_list, series_seq
@@ -26,6 +27,7 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger("teddybridge")
 
 CFG = config.load()
+i18n.DEFAULT = CFG.ui_lang or "en"  # Rückfall ohne Cookie/Accept-Language, z. B. für Skripte
 ABS = Abs(CFG) if CFG.abs_enabled else None
 TC = Tc(CFG)
 _libs = {"t": 0, "names": {}}
@@ -35,7 +37,7 @@ def lib_name(lib_id):
     if lib_id not in _libs["names"] or time.time() - _libs["t"] > 600:
         _libs["names"] = {l["id"]: l["name"] for l in abs_().libraries()}
         _libs["t"] = time.time()
-    return _libs["names"].get(lib_id, "Bibliothek")
+    return _libs["names"].get(lib_id) or t("Bibliothek")
 
 
 ND = Nd(CFG) if CFG.nd_enabled else None
@@ -151,7 +153,7 @@ async def require_login(request: Request, call_next):
         log.warning("Anmeldung: falsche Zugangsdaten (Basic) von %s", _client(request))
         await asyncio.sleep(1)
     if request.url.path.startswith("/api/"):
-        return JSONResponse({"error": "Anmeldung erforderlich"}, status_code=401)
+        return JSONResponse({"error": t("Anmeldung erforderlich")}, status_code=401)
     return RedirectResponse("/login", status_code=303)
 
 
@@ -169,11 +171,42 @@ async def security_headers(request: Request, call_next):
     return resp
 
 
+LANG_COOKIE = "tb_lang"
+
+
+def req_lang(request):
+    """Sprache einer Anfrage: UI_LANG (fest) > Cookie (Auswahl in der Oberfläche) > Accept-Language > Standard."""
+    return (CFG.ui_lang or i18n.norm(request.cookies.get(LANG_COOKIE))
+            or i18n.from_accept(request.headers.get("accept-language")) or i18n.DEFAULT)
+
+
+@app.middleware("http")  # zuletzt registriert = äusserste Schicht: gilt auch für 401 aus require_login
+async def language(request: Request, call_next):
+    token = i18n.set(req_lang(request))
+    try:
+        return await call_next(request)
+    finally:
+        i18n.reset(token)
+
+
+_PAGES = {}
+
+
+def page(name, request):
+    """HTML-Seite mit der Sprache der Anfrage im <html lang>; data-lang-fixed=1, wenn UI_LANG gesetzt ist."""
+    if name not in _PAGES:
+        with open(os.path.join(STATIC, name), encoding="utf-8") as f:
+            _PAGES[name] = f.read()
+    html = _PAGES[name].replace('<html lang="de">', f'<html lang="{req_lang(request)}" '
+                                f'data-lang-fixed="{1 if CFG.ui_lang else 0}">', 1)
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache", "Vary": "Cookie, Accept-Language"})
+
+
 @app.get("/login")
 def login_page(request: Request):
     if not CFG.ui_auth or _session_ok(request.cookies.get(SESSION_COOKIE)):
         return RedirectResponse("/", status_code=303)
-    return FileResponse(os.path.join(STATIC, "login.html"), headers={"Cache-Control": "no-cache"})
+    return page("login.html", request)
 
 
 @app.post("/login")
@@ -241,19 +274,20 @@ def simplify_nd(a):
 
 
 @app.get("/")
-def index():
-    return FileResponse(os.path.join(STATIC, "index.html"), headers={"Cache-Control": "no-cache"})
+def index(request: Request):
+    return page("index.html", request)
 
 
 @app.get("/api/config")
 def get_config():
     return {"tcBase": CFG.tc_base, "maxFiles": MAX_FILES, "discord": bool(CFG.discord_webhook), "readonly": READONLY, "auth": CFG.ui_auth,
+            "lang": i18n.get(), "langFixed": bool(CFG.ui_lang),
             "sources": (["abs"] if ABS else []) + (["nd"] if ND else []) + (["fs"] if FS else [])}
 
 
 def abs_():
     if not ABS:
-        raise HTTPException(404, "Audiobookshelf ist nicht konfiguriert")
+        raise HTTPException(404, t("Audiobookshelf ist nicht konfiguriert"))
     return ABS
 
 
@@ -290,7 +324,7 @@ def collection_items(lib: str, cid: str):
     for c in abs_().collections(lib):
         if c.get("id") == cid:
             return {"id": cid, "name": c["name"], "items": [simplify(b) for b in c.get("books") or []]}
-    raise HTTPException(404, "Sammlung nicht gefunden")
+    raise HTTPException(404, t("Sammlung nicht gefunden"))
 
 
 @app.get("/api/libraries/{lib}/series")
@@ -335,13 +369,13 @@ ND_SORT = {"addedAt:1": "newest", "media.metadata.title:0": "alphabeticalByName"
 
 def nd():
     if not ND:
-        raise HTTPException(404, "Navidrome ist nicht konfiguriert")
+        raise HTTPException(404, t("Navidrome ist nicht konfiguriert"))
     return ND
 
 
 def nd_lib(lib):
     if not lib.isdigit():
-        raise HTTPException(422, "ungültiger Musikordner")
+        raise HTTPException(422, t("ungültiger Musikordner"))
     return int(lib)
 
 
@@ -437,7 +471,7 @@ FSID = r"^(-|[A-Za-z0-9_-]{1,1400})$"
 
 def fs():
     if not FS:
-        raise HTTPException(404, "Dateiquelle ist nicht konfiguriert")
+        raise HTTPException(404, t("Dateiquelle ist nicht konfiguriert"))
     return FS
 
 
@@ -459,7 +493,7 @@ def fs_search(lib: str, q: str = Query(..., min_length=1, max_length=200)):
 @app.get("/api/fs/libraries/{lib}/cover/{item_id}")
 def fs_cover(lib: str, item_id: str):
     if not re.match(FSID, item_id):
-        raise HTTPException(422, "ungültige Ordner-ID")
+        raise HTTPException(422, t("ungültige Ordner-ID"))
     res = fs().cover(lib, item_id)
     if not res:
         return Response(status_code=404)
@@ -498,38 +532,38 @@ class JobRequest(BaseModel):
 @app.post("/api/jobs")
 def submit(req: JobRequest):
     if READONLY:
-        raise HTTPException(403, "Nur-Lese-Modus: Übertragen ist deaktiviert")
+        raise HTTPException(403, t("Nur-Lese-Modus: Übertragen ist deaktiviert"))
     if any(i.source == "abs" for i in req.items) and not ABS:
-        raise HTTPException(400, "Audiobookshelf ist nicht konfiguriert")
+        raise HTTPException(400, t("Audiobookshelf ist nicht konfiguriert"))
     if any(i.source == "nd" for i in req.items) and not ND:
-        raise HTTPException(400, "Navidrome ist nicht konfiguriert")
+        raise HTTPException(400, t("Navidrome ist nicht konfiguriert"))
     if any(i.source == "fs" for i in req.items) and not FS:
-        raise HTTPException(400, "Dateiquelle ist nicht konfiguriert")
+        raise HTTPException(400, t("Dateiquelle ist nicht konfiguriert"))
     for i in req.items:
         if i.source != "fs" and not ID.match(i.id):
-            raise HTTPException(422, "ungültige ID")
+            raise HTTPException(422, t("ungültige ID"))
         if i.source == "fs":
             if not (i.lib or "").isdigit():
-                raise HTTPException(422, "Dateiquelle: Freigabe fehlt")
+                raise HTTPException(422, t("Dateiquelle: Freigabe fehlt"))
             FS.resolve(i.lib, i.id)  # wirft bei ungültigem Pfad / ausserhalb der Freigabe
         if i.split and i.merge:
-            raise HTTPException(422, "entweder Aufteilen oder Zusammenfügen")
+            raise HTTPException(422, t("entweder Aufteilen oder Zusammenfügen"))
         if i.kind != "album" and i.source != "nd":
-            raise HTTPException(422, "Playlists gibt es nur bei Navidrome")
+            raise HTTPException(422, t("Playlists gibt es nur bei Navidrome"))
         if i.kind == "songs":
             if not i.songs or not all(ID.match(x) for x in i.songs):
-                raise HTTPException(422, "eigene Playlist: ungültige oder leere Titelliste")
+                raise HTTPException(422, t("eigene Playlist: ungültige oder leere Titelliste"))
             if not i.title.strip():
-                raise HTTPException(422, "eigene Playlist: Name fehlt")
+                raise HTTPException(422, t("eigene Playlist: Name fehlt"))
     bundle = None
     if req.bundle is not None:
         bundle = req.bundle.strip()
         if not bundle:
-            raise HTTPException(422, "Sammel-TAF: Name fehlt")
+            raise HTTPException(422, t("Sammel-TAF: Name fehlt"))
         if len(req.items) < 2:
-            raise HTTPException(422, "Sammel-TAF: mindestens zwei Einträge auswählen")
+            raise HTTPException(422, t("Sammel-TAF: mindestens zwei Einträge auswählen"))
         if len({(i.source, i.lib, i.id, i.kind) for i in req.items}) != len(req.items):
-            raise HTTPException(422, "Sammel-TAF: ein Eintrag ist doppelt ausgewählt")
+            raise HTTPException(422, t("Sammel-TAF: ein Eintrag ist doppelt ausgewählt"))
     sub = (req.subfolder or "").strip() or None
     if sub:
         clean_folder(sub)

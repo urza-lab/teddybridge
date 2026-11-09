@@ -15,6 +15,7 @@ import stat
 import time
 
 from .clients import ApiError
+from .i18n import t
 
 AUDIO = {".mp3", ".m4a", ".m4b", ".aac", ".ogg", ".oga", ".opus", ".flac", ".wav", ".wma", ".aif", ".aiff", ".mka"}
 IMAGES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
@@ -40,10 +41,10 @@ def decode_id(item_id):
     try:
         rel = os.fsdecode(base64.urlsafe_b64decode(item_id + "=" * (-len(item_id) % 4)))
     except (binascii.Error, ValueError):
-        raise ApiError("ungültige Ordner-ID") from None
+        raise ApiError(t("ungültige Ordner-ID")) from None
     parts = rel.split("/")
     if rel.startswith("/") or "\x00" in rel or any(p in ("", ".", "..") for p in parts):
-        raise ApiError("ungültige Ordner-ID")
+        raise ApiError(t("ungültige Ordner-ID"))
     return rel
 
 
@@ -77,10 +78,10 @@ class Fs:
 
     def root(self, lib):
         if not (lib or "").isdigit() or int(lib) >= len(self.roots):
-            raise ApiError("unbekannter Ordner")
+            raise ApiError(t("unbekannter Ordner"))
         name, path = self.roots[int(lib)]
         if not os.path.isdir(path):
-            raise ApiError(f"Freigabe „{name}“ ist nicht erreichbar (nicht eingehängt?)")
+            raise ApiError(t("Freigabe „{name}“ ist nicht erreichbar (nicht eingehängt?)", name=name))
         return name, os.path.realpath(path)
 
     def _inside(self, root_real, path):
@@ -93,7 +94,7 @@ class Fs:
         rel = decode_id(item_id)
         real = self._inside(root_real, os.path.join(root_real, rel))
         if not real or not os.path.isdir(real):
-            raise ApiError("Ordner nicht gefunden")
+            raise ApiError(t("Ordner nicht gefunden"))
         return name, rel, real
 
     def mark(self, lib, item_id):
@@ -131,7 +132,7 @@ class Fs:
                         elif ext in IMAGES:
                             images.append((nm, real))
         except OSError as e:
-            raise ApiError(f"Ordner nicht lesbar ({e.strerror or type(e).__name__})") from None
+            raise ApiError(t("Ordner nicht lesbar ({err})", err=e.strerror or type(e).__name__)) from None
         key = lambda t: natural(t[0])
         return sorted(dirs, key=key), sorted(audio, key=key), sorted(images, key=key)
 
@@ -247,15 +248,15 @@ class Fs:
         """Eine Datei lokal kopieren (nur lesen). Prüft erneut, dass sie in der Freigabe liegt."""
         real = self._inside(root_real, src)
         if not real:
-            raise ApiError("Datei liegt ausserhalb der Freigabe")
+            raise ApiError(t("Datei liegt ausserhalb der Freigabe"))
         try:
             st = os.stat(real)
             if not stat.S_ISREG(st.st_mode):
-                raise ApiError(f"{shown(os.path.basename(src))} ist keine normale Datei")
+                raise ApiError(t("{name} ist keine normale Datei", name=shown(os.path.basename(src))))
             with open(real, "rb") as fi, open(dest, "wb") as fo:
                 while chunk := fi.read(1 << 20):
                     fo.write(chunk)
         except OSError as e:
-            raise ApiError(f"{shown(os.path.basename(src))} nicht lesbar ({e.strerror or type(e).__name__})") from None
+            raise ApiError(t("{name} nicht lesbar ({err})", name=shown(os.path.basename(src)), err=e.strerror or type(e).__name__)) from None
         if os.path.getsize(dest) != st.st_size:
-            raise ApiError(f"{shown(os.path.basename(src))}: unvollständig gelesen")
+            raise ApiError(t("{name}: unvollständig gelesen", name=shown(os.path.basename(src))))

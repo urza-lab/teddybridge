@@ -15,6 +15,8 @@ import httpx
 from . import chapters, mp3cat
 from .clients import ApiError
 from .fs import shown
+from . import i18n
+from .i18n import t
 
 log = logging.getLogger("teddybridge")
 
@@ -28,7 +30,7 @@ FINAL = ("done", "skipped", "error")
 def clean_name(s, maxlen=120):
     s = CTRL.sub("", BAD_CHARS.sub("-", s or "")).strip()
     s = s[:maxlen].rstrip(" .")
-    return s or "Hoerspiel"
+    return s or t("Hoerspiel")
 
 
 def clean_folder(path):
@@ -36,7 +38,7 @@ def clean_folder(path):
     parts = [p.strip() for p in (path or "").replace("\\", "/").split("/")]
     parts = [p for p in parts if p]
     if not parts or any(p in (".", "..") or CTRL.search(p) or p.startswith("_src_") for p in parts):
-        raise ApiError("ungültiger Zielordner")
+        raise ApiError(t("ungültiger Zielordner"))
     return "/".join(clean_name(p, 80) for p in parts)
 
 
@@ -140,7 +142,7 @@ def item_folder_parts(item, lib_name):
         group = md["authors"][0].get("name", "")
     if not group and md.get("authorName"):
         group = md["authorName"].split(", ")[0]
-    return [clean_name(lib_name or "Bibliothek", 80), clean_name(group or "Sonstige", 80)]
+    return [clean_name(lib_name or t("Bibliothek"), 80), clean_name(group or t("Sonstige"), 80)]
 
 
 def _size(p):
@@ -244,8 +246,8 @@ def merge_units(pieces, limit=None):
     if not chapters.available():
         other = sorted({_ext(p["f"]) or "?" for u in units if len(normalize(u)) > 1 for p in u} - {"mp3"})
         if other:
-            raise ApiError(f"Zusammenfügen von {', '.join(other)} braucht ffmpeg (nicht installiert) – "
-                           f"bitte „Aufteilen“ wählen")
+            raise ApiError(t("Zusammenfügen von {fmts} braucht ffmpeg (nicht installiert) – bitte „Aufteilen“ wählen",
+                             fmts=", ".join(other)))
     return units
 
 
@@ -257,17 +259,19 @@ def merge_plan(files):
 
 def note_for(nbooks, nfiles, npieces, nunits):
     """Kurzer Hinweis für die Warteschlange, was mit den Kapiteln passiert ist."""
-    datei = "Datei" if nfiles == 1 else "Dateien"
+    one = nfiles == 1
     if npieces > nfiles:
-        txt = f"{nfiles} {datei} in {npieces} Kapitel geschnitten"
+        txt = t("{n} Datei in {p} Kapitel geschnitten" if one else "{n} Dateien in {p} Kapitel geschnitten",
+                n=nfiles, p=npieces)
         if nunits < npieces:
-            txt += f", zu {nunits} zusammengefügt"
+            txt += t(", zu {u} zusammengefügt", u=nunits)
     elif nunits < nfiles:
-        txt = f"{nfiles} {datei} zu {nunits} Kapiteln zusammengefügt"
+        txt = t("{n} Datei zu {u} Kapiteln zusammengefügt" if one else "{n} Dateien zu {u} Kapiteln zusammengefügt",
+                n=nfiles, u=nunits)
     else:
         txt = None
     if nbooks > 1:
-        return f"{nbooks} Hörbücher, {nunits} Kapitel" + (f" ({txt})" if txt else "")
+        return t("{b} Hörbücher, {u} Kapitel", b=nbooks, u=nunits) + (f" ({txt})" if txt else "")
     return txt
 
 
@@ -329,6 +333,7 @@ class Queue:
                     "state": "waiting", "n": 0, "m": 0, "part": 0, "parts": 0, "error": None,
                     "taf": None, "check": None, "warning": None, "note": None,
                     "secs": None, "eta": None, "pct": None, "created": time.time(), "finished": None,
+                    "lang": i18n.get(),  # Sprache der Meldungen/Ordnernamen: die der Anfrage beim Einreihen
                 }
                 jids.append(jid)
             self.batches[bid] = {"jobs": jids, "results": {}, "notified": False}
@@ -362,24 +367,31 @@ class Queue:
             jid = self.q.get()
             with self.lock:
                 job = dict(self.jobs[jid])
+            lang = i18n.set(job.get("lang"))
             try:
-                self._process(jid, job)
-            except ApiError as e:
-                self._fail(jid, str(e))
-            except Exception as e:  # nie Details mit evtl. Geheimnissen ausgeben
-                log.exception("Unerwarteter Fehler bei Auftrag %s", jid)
-                self._fail(jid, f"interner Fehler ({type(e).__name__})")
-            self.changed = time.time()
-            try:
-                with self.lock:
-                    final = dict(self.jobs[jid])
-                self._notify_job(final)
-            except Exception:
-                log.exception("Fehler bei der Discord-Meldung")
-            try:
-                self._check_batch(job["batch"])
-            except Exception:
-                log.exception("Fehler bei der Stapel-Auswertung")
+                self._run_one(jid, job)
+            finally:
+                i18n.reset(lang)
+
+    def _run_one(self, jid, job):
+        try:
+            self._process(jid, job)
+        except ApiError as e:
+            self._fail(jid, str(e))
+        except Exception as e:  # nie Details mit evtl. Geheimnissen ausgeben
+            log.exception("Unerwarteter Fehler bei Auftrag %s", jid)
+            self._fail(jid, t("interner Fehler ({name})", name=type(e).__name__))
+        self.changed = time.time()
+        try:
+            with self.lock:
+                final = dict(self.jobs[jid])
+            self._notify_job(final)
+        except Exception:
+            log.exception("Fehler bei der Discord-Meldung")
+        try:
+            self._check_batch(job["batch"])
+        except Exception:
+            log.exception("Fehler bei der Stapel-Auswertung")
 
     def _fail(self, jid, msg):
         for s in self.cfg.secrets():
@@ -407,7 +419,7 @@ class Queue:
 
     def _prepare_nd(self, job):
         if not self.nd:
-            raise ApiError("Navidrome ist nicht konfiguriert")
+            raise ApiError(t("Navidrome ist nicht konfiguriert"))
         kind = job.get("kind") or "album"
         if kind == "playlist":
             pl = self.nd.playlist(job["item_id"])
@@ -431,7 +443,7 @@ class Queue:
 
     def _prepare_fs(self, job):
         if not self.fs:
-            raise ApiError("Dateiquelle ist nicht konfiguriert")
+            raise ApiError(t("Dateiquelle ist nicht konfiguriert"))
         title, parts, files, root_real = self.fs.item(job.get("lib"), job["item_id"])
         out = [{"ext": os.path.splitext(p)[1].lstrip("."), "dur": 0, "size": _size(p), "name": shown(os.path.basename(p)),
                 "fetch": (lambda path, src=p: self.fs.copy(root_real, src, path))} for p in files]
@@ -454,11 +466,11 @@ class Queue:
                    "lib": it.get("lib"), "kind": it.get("kind") or "album", "songs": list(it.get("songs") or [])}
             _, _, _, fs = self._prepare(sub)
             if not fs:
-                raise ApiError(f"„{sub['title']}“: keine Audiodateien")
+                raise ApiError(t("„{title}“: keine Audiodateien", title=sub["title"]))
             for f in fs:
                 f["book"] = k
             files += fs
-        return job["title"], ["Sammlungen"], None, files
+        return job["title"], [t("Sammlungen")], None, files
 
     def _process(self, jid, job):
         short = job["mark"]
@@ -470,10 +482,10 @@ class Queue:
         self._set(jid, title=title, folder=folder)
 
         if not files:
-            raise ApiError("keine Audiodateien")
+            raise ApiError(t("keine Audiodateien"))
         if len(files) > MAX_FILES and not (job["split"] or job.get("merge") or bundle):
-            raise ApiError(f"{len(files)} Audiodateien, TeddyCloud erlaubt max. {MAX_FILES} – "
-                           f"nicht übertragen (weder Aufteilen noch Zusammenfügen gewählt)")
+            raise ApiError(t("{n} Audiodateien, TeddyCloud erlaubt max. {max} – nicht übertragen (weder Aufteilen noch "
+                             "Zusammenfügen gewählt)", n=len(files), max=MAX_FILES))
 
         # Duplikatprüfung im ganzen Basisordner (auch wenn sich Serie/Ordner seither geändert hat)
         # auch in TC_BASE_EXTRA (z. B. alter Basisordner): dort nur suchen, nie schreiben
@@ -483,8 +495,8 @@ class Queue:
             for d, n in [hit for b in bases for hit in find_marker(self.tc, b, short)]:
                 h = self.tc.taf_header(d, n)
                 if h is not None and not (h.get("valid") and h.get("trackSeconds") and h.get("lengthSeconds")):
-                    raise ApiError(f"in TeddyCloud liegt eine unvollständige TAF „{n}“ in {d} (früher abgebrochen) – "
-                                   f"bitte dort löschen und das Hörbuch neu übertragen")
+                    raise ApiError(t("in TeddyCloud liegt eine unvollständige TAF „{name}“ in {folder} (früher abgebrochen) – "
+                                     "bitte dort löschen und das Hörbuch neu übertragen", name=n, folder=d))
             log.info("Auftrag %s: [%s] schon vorhanden", jid, short)
             self._set(jid, state="skipped", finished=time.time())
             return
@@ -494,7 +506,8 @@ class Queue:
         # Plan: [(TAF-Name, [Kapitel])], ein Kapitel = Liste von Stücken (ganze Dateien oder Kapitelbereiche)
         if len(pieces) > MAX_FILES and job["split"] and not bundle:
             chunks = split_parts(pieces)
-            plan = [(f"{clean} - Teil {k} von {len(chunks)} [{short}-{k}].taf", [[p] for p in c])
+            plan = [(t("{clean} - Teil {k} von {n} [{mark}].taf", clean=clean, k=k, n=len(chunks), mark=f"{short}-{k}"),
+                     [[p] for p in c])
                     for k, c in enumerate(chunks, 1) if f"{short}-{k}" not in have]
             if not plan:
                 self._set(jid, state="skipped", finished=time.time())
@@ -574,17 +587,17 @@ class Queue:
                         stop.set()
                         verdict = self._after_encode_error(jid, e, folder, taf, len(chunk), src, len(sources), existed)
                         if verdict == "complete":
-                            self._set(jid, warning=f"TeddyCloud meldete einen Fehler ({e}), die TAF ist aber vollständig")
+                            self._set(jid, warning=t("TeddyCloud meldete einen Fehler ({err}), die TAF ist aber vollständig", err=e))
                             break
                         if verdict == "retry" and attempt <= RETRY_MAX:
                             log.warning("Auftrag %s: Umwandeln abgebrochen (%s), Neuversuch %d/%d", jid, e, attempt, RETRY_MAX)
                             self._set(jid, state="encoding", pct=0, eta=int(enc_est(k - 1)),
-                                      warning=f"Umwandeln {attempt}× abgebrochen ({e}), automatisch wiederholt")
+                                      warning=t("Umwandeln {n}× abgebrochen ({err}), automatisch wiederholt", n=attempt, err=e))
                             continue
                         if verdict == "retry":  # aufgegeben: eigene halbe TAF nicht liegen lassen
                             self._remove_own_partial(folder, taf, len(chunk), existed)
-                            raise ApiError(f"{e} – TeddyCloud hat das Umwandeln {attempt}× abgebrochen, aufgegeben; "
-                                           f"die halbe TAF wurde entfernt, ein neuer Versuch ist jederzeit möglich") from None
+                            raise ApiError(t("{err} – TeddyCloud hat das Umwandeln {n}× abgebrochen, aufgegeben; die halbe TAF wurde "
+                                             "entfernt, ein neuer Versuch ist jederzeit möglich", err=e, n=attempt)) from None
                         raise ApiError(self._explain_encode_error(e, folder, taf, len(chunk))) from None
                     finally:
                         stop.set()
@@ -615,7 +628,7 @@ class Queue:
     def _tc_state(self, folder, taf):
         """-> (Grösse oder None, TAF-Kopf oder None); wirft ApiError, wenn TeddyCloud nicht erreichbar ist."""
         if self.tc_poll.list_dir(folder) is None:
-            raise ApiError("TeddyCloud antwortet nicht")
+            raise ApiError(t("TeddyCloud antwortet nicht"))
         size = self.tc_poll.file_size(folder, taf)
         return size, (self.tc_poll.taf_header(folder, taf) if size is not None else None)
 
@@ -695,9 +708,10 @@ class Queue:
         if head is not None and head.get("valid") and tracks == expected:
             return msg  # TAF ist trotz Fehler vollständig
         log.warning("Unvollständige TAF nach Fehler: %s/%s (%d Bytes, %d von %d Kapiteln)", folder, taf, size, tracks, expected)
-        return (f"{msg} – TeddyCloud hat das Umwandeln abgebrochen (Neustart/Absturz?). Eine unvollständige TAF "
-                f"„{taf}“ ({size // 2 ** 20} MB, {tracks} von {expected} Kapiteln) liegt in {folder}: "
-                f"bitte in TeddyCloud löschen und das Hörbuch neu übertragen")
+        return t("{err} – TeddyCloud hat das Umwandeln abgebrochen (Neustart/Absturz?). Eine unvollständige TAF "
+                 "„{taf}“ ({mb} MB, {tracks} von {expected} Kapiteln) liegt in {folder}: bitte in TeddyCloud löschen "
+                 "und das Hörbuch neu übertragen", err=msg, taf=taf, mb=size // 2 ** 20, tracks=tracks,
+                 expected=expected, folder=folder)
 
     def _learn(self, folder, taf, secs, took):
         """Tempo und TAF-Bitrate aus dem echten Ergebnis nachlernen (gleitender Mittelwert, plausibel begrenzt)."""
@@ -729,7 +743,7 @@ class Queue:
         """Discord-Meldung pro Auftrag: fertig (mit Kapiteln/Dauer/Ordner) oder Fehler. Übersprungene nur in der Summe."""
         name = (job.get("taf") or job.get("title") or "?").removesuffix(".taf")
         if job["state"] == "done":
-            text = f"✅ teddybridge: **{name}** fertig"
+            text = t("✅ teddybridge: **{name}** fertig", name=name)
             if job.get("check"):
                 text += f" – {job['check']}"
             elif job.get("secs"):
@@ -738,7 +752,7 @@ class Queue:
                 text += f"\n⚠ {job['warning']}"
             text += f"\n📁 {job.get('folder') or ''}"
         elif job["state"] == "error":
-            text = f"❌ teddybridge: **{job.get('title') or name}** fehlgeschlagen: {job.get('error') or '?'}"
+            text = t("❌ teddybridge: **{name}** fehlgeschlagen: {err}", name=job.get("title") or name, err=job.get("error") or "?")
         else:
             return
         self._discord(text)
@@ -754,7 +768,7 @@ class Queue:
             if _whole(p):
                 return cache[id(p["f"])]
             return chapters.cut(cache[id(p["f"])], _ext(p["f"]), p["start"], p["end"], dest)
-        names = [p["f"].get("name") or f"Datei {i + 1}" for i, p in enumerate(unit)]
+        names = [p["f"].get("name") or t("Datei {n}", n=i + 1) for i, p in enumerate(unit)]
         if all(_whole(p) and _ext(p["f"]) == "mp3" for p in unit):
             try:
                 mp3cat.concat([cache[id(p["f"])] for p in unit], dest + ".mp3", names)
@@ -764,7 +778,7 @@ class Queue:
                     raise
                 log.info("MP3 nicht direkt verbindbar (%s), verbinde mit ffmpeg", e)
         if not chapters.available():
-            raise ApiError(f"{names[0]}: Zusammenfügen braucht ffmpeg (nicht installiert) – bitte „Aufteilen“ wählen")
+            raise ApiError(t("{name}: Zusammenfügen braucht ffmpeg (nicht installiert) – bitte „Aufteilen“ wählen", name=names[0]))
         return chapters.join([(cache[id(p["f"])], p["start"], p["end"]) for p in unit], dest)
 
     def _verify(self, jid, folder, plan):
@@ -776,9 +790,10 @@ class Queue:
                 return  # Server liefert keinen TAF-Kopf: Prüfung überspringen
             tracks = len(h.get("trackSeconds") or [])
             secs = int(h.get("lengthSeconds") or 0)
-            label = f"{tracks} Kapitel, {secs // 60}:{secs % 60:02d}"
+            label = t("{tracks} Kapitel, {mm}:{ss}", tracks=tracks, mm=secs // 60, ss=f"{secs % 60:02d}")
             if not h.get("valid") or tracks != expected:
-                warns.append(f"{taf}: {label}, erwartet {expected} Kapitel" + ("" if h.get("valid") else ", TAF ungültig"))
+                warns.append(t("{taf}: {label}, erwartet {expected} Kapitel", taf=taf, label=label, expected=expected)
+                             + ("" if h.get("valid") else t(", TAF ungültig")))
             checks.append(label)
         with self.lock:
             before = self.jobs[jid].get("warning")  # z. B. „automatisch wiederholt“ nicht überschreiben
@@ -789,7 +804,7 @@ class Queue:
     def _cleanup(self, src):
         """Löscht nur Dateien im eigenen _src_-Ordner und danach den Ordner selbst."""
         if not src.rsplit("/", 1)[-1].startswith("_src_"):
-            raise ApiError("Aufräumen verweigert: kein _src_-Ordner")
+            raise ApiError(t("Aufräumen verweigert: kein _src_-Ordner"))
         if not self.tc.dir_exists(src):
             return
         listed = self.tc.list_dir(src) or []
@@ -808,7 +823,7 @@ class Queue:
             b["notified"] = True
             states = list(b["results"].values())
         x, y, z = states.count("done"), states.count("skipped"), states.count("error")
-        msg = f"teddybridge: {x} übertragen, {y} übersprungen, {z} Fehler"
+        msg = t("teddybridge: {x} übertragen, {y} übersprungen, {z} Fehler", x=x, y=y, z=z)
         log.info("Stapel %s abgeschlossen: %s", bid, msg)
         if len(states) > 1:  # bei einem einzelnen Auftrag reicht dessen eigene Meldung
             self._discord("📦 " + msg)

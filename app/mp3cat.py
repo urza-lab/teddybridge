@@ -12,6 +12,7 @@ import os
 import struct
 
 from .clients import ApiError
+from .i18n import t
 
 # Bitraten (kbit/s) für Layer III: [MPEG1, MPEG2/2.5]
 _BITRATES = ([0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0],
@@ -88,7 +89,7 @@ def audio_range(path):
                 start, fmt = pos + i, h
                 break
         if start is None or start >= end:
-            raise ApiError(f"{os.path.basename(path)}: keine MP3-Audiodaten gefunden")
+            raise ApiError(t("{name}: keine MP3-Audiodaten gefunden", name=os.path.basename(path)))
         # Xing/Info/VBRI-Frame am Anfang? Er enthält kein Audio, nur Infos zu dieser einen Datei.
         ver, _, mono, flen = fmt
         f.seek(start)
@@ -109,12 +110,12 @@ def concat(paths, dest, names=None):
         try:
             ranges.append(audio_range(p))
         except ApiError:
-            raise ApiError(f"{nm}: keine MP3-Audiodaten gefunden") from None
+            raise ApiError(t("{name}: keine MP3-Audiodaten gefunden", name=nm)) from None
     fmt0 = ranges[0][2]
     for nm, (_, _, fmt) in zip(names, ranges):
         if fmt != fmt0:
-            raise ApiError(f"{nm}: anderes MP3-Format ({_fmt(fmt)} statt {_fmt(fmt0)}), "
-                           f"kann nicht zusammengefügt werden – bitte „Aufteilen“ wählen")
+            raise ApiError(t("{name}: anderes MP3-Format ({fmt} statt {fmt0}), kann nicht zusammengefügt werden – bitte „Aufteilen“ wählen",
+                             name=nm, fmt=_fmt(fmt), fmt0=_fmt(fmt0)))
     with open(dest, "wb") as out:
         for p, (start, end, _) in zip(paths, ranges):
             with open(p, "rb") as f:

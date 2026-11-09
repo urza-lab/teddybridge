@@ -26,6 +26,14 @@ button{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600;
   <label>Passwort<input name="password" id="password" type="password" autocomplete="current-password" required></label>
   <button type="submit">Anmelden</button>
 </form>
-<script>if(new URLSearchParams(location.search).has('fehler')) document.getElementById('err').hidden=false;</script>
+<script>
+if(new URLSearchParams(location.search).has('fehler')) document.getElementById('err').hidden=false;
+if(document.documentElement.lang==='en'){
+  const EN={'Benutzer oder Passwort falsch.':'Wrong user name or password.','Benutzer':'User','Passwort':'Password','Anmelden':'Log in'};
+  const w=document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for(let n; (n=w.nextNode());){ const k=n.nodeValue.trim(); if(EN[k]) n.nodeValue=n.nodeValue.replace(k, EN[k]); }
+  document.title='teddybridge – Log in';
+}
+</script>
 </body>
 </html>

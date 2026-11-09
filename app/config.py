@@ -25,6 +25,7 @@ class Config:
     trusted_proxies: tuple = ()
     fs_roots: tuple = ()  # ((Name, Pfad), ...) – Dateiquelle, z. B. NAS per NFS/SMB
     tc_base_extra: tuple = ()  # weitere Ordner, die nur auf vorhandene TAFs durchsucht werden (nie beschrieben)
+    ui_lang: str = ""  # "de"/"en" = fest; leer = Browser-Sprache, umschaltbar in der Oberfläche
 
     @property
     def tc_scan_bases(self):
@@ -113,6 +114,11 @@ def load() -> Config:
     if not (os.environ.get("ABS_URL", "").strip() or os.environ.get("ND_URL", "").strip() or fs_roots):
         raise SystemExit("Keine Quelle konfiguriert: mindestens eine von Audiobookshelf (ABS_URL+ABS_TOKEN), "
                          "Navidrome (ND_URL+ND_USER+ND_PASS) oder Dateiquelle (FS_ROOTS) einrichten")
+    ui_lang = os.environ.get("UI_LANG", "").strip().lower()
+    if ui_lang == "auto":
+        ui_lang = ""
+    if ui_lang not in ("", "de", "en"):
+        raise SystemExit("UI_LANG: de, en oder leer (= Sprache des Browsers, umschaltbar)")
     auth = os.environ.get("TC_AUTH", "").strip()
     tc_auth = tuple(auth.split(":", 1)) if ":" in auth else None
     listen = os.environ.get("LISTEN", "0.0.0.0:8085")
@@ -135,4 +141,5 @@ def load() -> Config:
         trusted_proxies=tuple(proxies),
         fs_roots=fs_roots,
         tc_base_extra=tuple(extra),
+        ui_lang=ui_lang,
     )

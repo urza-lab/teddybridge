@@ -178,7 +178,8 @@ def main():
         procs.append(subprocess.Popen([PY, "-m", "app"], cwd=ROOT, env=env, stdout=applog, stderr=subprocess.STDOUT))
         wait_http(f"http://127.0.0.1:{TC_P}/_mock/log")
         wait_http(f"http://127.0.0.1:{APP_P}/api/config")
-        c = httpx.Client(base_url=f"http://127.0.0.1:{APP_P}", timeout=30, auth=("admin", UI_PW))
+        c = httpx.Client(base_url=f"http://127.0.0.1:{APP_P}", timeout=30, auth=("admin", UI_PW),
+                         headers={"Accept-Language": "de-CH,de;q=0.9"})  # Meldungen deutsch (Prüfungen unten)
 
         print("Passwort-Hash")
         sys.path.insert(0, ROOT)
@@ -230,7 +231,7 @@ def main():
         check("set-cookie" not in r.headers, "falscher Benutzer: kein Cookie")
         check(httpx.get(u + "/api/config", headers={"Authorization": "Basic %%%"}).status_code == 401, "kaputter Basic-Header abgelehnt")
         check(httpx.get(u + "/api/config", headers={"Cookie": "tb_session=erfunden"}).status_code == 401, "erfundenes Cookie abgelehnt")
-        b = httpx.Client(base_url=u, timeout=30)
+        b = httpx.Client(base_url=u, timeout=30, headers={"Accept-Language": "de"})
         r = b.post("/login", data={"username": "admin", "password": UI_PW})
         sc = r.headers.get("set-cookie", "")
         check(r.status_code == 303 and r.headers["location"] == "/" and "HttpOnly" in sc and "SameSite=strict" in sc.replace("Strict", "strict"),
@@ -760,6 +761,43 @@ print("RESULT" + json.dumps(out))
             check(not [p for p in tree(os.path.join(lib, BASE)) if "_src_" in p], "keine _src_-Reste (auch nach Fehlern)")
             check(all(os.path.getsize(os.path.join(d, n)) > 0 for d in echt.values() for n in os.listdir(d)),
                   "Testdateien auf dem NAS unverändert vorhanden")
+
+        print("Sprache")
+        EN = {"Accept-Language": "en-US,en;q=0.9"}
+        h = c.get("/", headers=EN).text
+        check('<html lang="en" data-lang-fixed="0">' in h, "Accept-Language en -> Seite englisch, umschaltbar")
+        check('<html lang="de" data-lang-fixed="0">' in c.get("/").text, "Accept-Language de -> Seite deutsch")
+        check('<html lang="de"' in c.get("/", headers={**EN, "Cookie": "tb_lang=de"}).text, "Cookie (Auswahl) schlägt Accept-Language")
+        check('<html lang="en"' in httpx.get(f"http://127.0.0.1:{APP_P}/login", headers=EN, follow_redirects=False).text,
+              "Login-Seite englisch")
+        check(c.get("/api/config", headers=EN).json().get("lang") == "en", "api/config meldet Sprache")
+        r = httpx.get(f"http://127.0.0.1:{APP_P}/api/config", headers=EN)
+        check(r.status_code == 401 and r.json().get("error") == "Login required", "401 englisch")
+        r = c.post("/api/jobs", headers=EN, json={"items": [{"id": A}], "bundle": "X"})
+        check(r.status_code == 422 and "select at least two" in r.text, f"API-Fehler englisch ({r.text[:80]})")
+        n_before = len(c.get("/api/jobs").json())
+        c.post("/api/jobs", headers=EN, json={"items": [{"id": C}]})
+        je = wait_jobs(c, n_before + 1)[-1]
+        check(je["state"] == "error" and "TeddyCloud allows at most" in (je["error"] or ""),
+              f"Auftrag in der Sprache der Anfrage ({(je['error'] or '')[:60]})")
+        for _ in range(50):
+            raw = httpx.get(f"http://127.0.0.1:{TC_P}/_mock/discord").json()
+            if any("failed:" in m["content"] for m in raw):
+                break
+            time.sleep(0.1)
+        check(any(m["content"].startswith("❌ teddybridge:") and "failed:" in m["content"] for m in raw), "Discord englisch")
+        check(isinstance(cfg_err(UI_LANG="fr"), str), "UI_LANG ungültig: Startabbruch")
+        check(cfg_err(UI_LANG="EN").ui_lang == "en" and cfg_err(UI_LANG="auto").ui_lang == "", "UI_LANG en/auto")
+        probe = r'''
+from fastapi.testclient import TestClient
+from app import main
+c = TestClient(main.app); c.auth = ("admin", main.CFG.ui_pass)
+h = c.get("/", headers={"Accept-Language": "en", "Cookie": "tb_lang=en"}).text
+print("RESULT", '<html lang="de" data-lang-fixed="1">' in h, c.get("/api/config").json()["langFixed"])
+'''
+        penv = dict(env, UI_LANG="de", UI_PASS=UI_PW, UI_PASS_HASH="", LISTEN="127.0.0.1:1")
+        r = subprocess.run([PY, "-c", probe], cwd=ROOT, env=penv, capture_output=True, text=True, timeout=60)
+        check("RESULT True True" in r.stdout, f"UI_LANG=de: fest deutsch, ohne Auswahl ({r.stdout[-60:]}{r.stderr[-200:]})")
 
         print("Regeln")
         abslog = httpx.get(f"http://127.0.0.1:{ABS_P}/_mock/log").json()

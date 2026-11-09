@@ -12,6 +12,8 @@ import uuid
 
 import httpx
 
+from .i18n import t
+
 log = logging.getLogger("teddybridge")
 
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -29,7 +31,7 @@ def _err(service, what, r: httpx.Response):
 
 def check_id(item_id: str) -> str:
     if not ID_RE.match(item_id or ""):
-        raise ApiError("ungültige ID")
+        raise ApiError(t("ungültige ID"))
     return item_id
 
 
@@ -48,7 +50,7 @@ class Abs:
         try:
             r = self.c.get(path, params={k: v for k, v in params.items() if v is not None})
         except httpx.HTTPError as e:
-            raise ApiError(f"ABS {what}: Verbindungsfehler ({type(e).__name__})") from None
+            raise ApiError(t("ABS {what}: Verbindungsfehler ({name})", what=what, name=type(e).__name__)) from None
         if r.status_code != 200:
             raise _err("ABS", what, r)
         return r
@@ -101,8 +103,8 @@ class Abs:
                 return
             except httpx.HTTPError as e:
                 if attempt == tries:
-                    raise ApiError(f"ABS Download: Verbindungsfehler ({type(e).__name__}) "
-                                   f"nach {tries} Versuchen") from None
+                    raise ApiError(t("ABS {what}: Verbindungsfehler ({name})", what="Download", name=type(e).__name__)
+                                   + f" ({tries}×)") from None
                 log.warning("ABS Download: %s, Versuch %d/%d", type(e).__name__, attempt, tries)
                 time.sleep(2 * attempt)
 
@@ -133,16 +135,16 @@ class Nd:
         try:
             r = self.c.get(f"/rest/{method}", params=q)
         except httpx.HTTPError as e:
-            raise ApiError(f"Navidrome {what}: Verbindungsfehler ({type(e).__name__})") from None
+            raise ApiError(t("Navidrome {what}: Verbindungsfehler ({name})", what=what, name=type(e).__name__)) from None
         if r.status_code != 200:
             raise ApiError(f"Navidrome {what}: HTTP {r.status_code}")
         try:
             d = r.json()["subsonic-response"]
         except (ValueError, KeyError):
-            raise ApiError(f"Navidrome {what}: unerwartete Antwort") from None
+            raise ApiError(t("Navidrome {what}: unerwartete Antwort", what=what)) from None
         if d.get("status") != "ok":
             err = d.get("error") or {}
-            raise ApiError(f"Navidrome {what}: {str(err.get('message') or 'Fehler')[:200]} (Code {err.get('code')})")
+            raise ApiError(f"Navidrome {what}: {str(err.get('message') or t('Fehler'))[:200]} (Code {err.get('code')})")
         return d
 
     def folders(self):
@@ -198,7 +200,7 @@ class Nd:
                     ctype = r.headers.get("content-type", "")
                     if r.status_code != 200 or "json" in ctype or "xml" in ctype:
                         body = r.read().decode(errors="replace")
-                        msg = "Fehler"
+                        msg = t("Fehler")
                         try:
                             msg = (httpx.Response(200, content=body).json()["subsonic-response"]
                                    .get("error") or {}).get("message") or msg
@@ -215,8 +217,8 @@ class Nd:
                 return
             except httpx.HTTPError as e:
                 if attempt == tries:
-                    raise ApiError(f"Navidrome Download: Verbindungsfehler ({type(e).__name__}) "
-                                   f"nach {tries} Versuchen") from None
+                    raise ApiError(t("Navidrome {what}: Verbindungsfehler ({name})", what="Download", name=type(e).__name__)
+                                   + f" ({tries}×)") from None
                 log.warning("Navidrome Download: %s, Versuch %d/%d", type(e).__name__, attempt, tries)
                 time.sleep(2 * attempt)
 
@@ -252,7 +254,7 @@ class Tc:
                                    timeout=timeout or self.c.timeout, **kw)
             except httpx.HTTPError as e:
                 if attempt == tries:
-                    raise ApiError(f"TeddyCloud {what}: Verbindungsfehler ({type(e).__name__})") from None
+                    raise ApiError(t("TeddyCloud {what}: Verbindungsfehler ({name})", what=what, name=type(e).__name__)) from None
                 log.warning("TeddyCloud %s: %s, Versuch %d/%d", what, type(e).__name__, attempt, tries)
             else:
                 if r.status_code not in self.RETRY_STATUS or attempt == tries:
@@ -272,7 +274,7 @@ class Tc:
         für Existenzprüfungen daher dir_exists() verwenden."""
         r = self._request("GET", "/api/fileIndex", "fileIndex", params={"path": rel, **self.LIB})
         if r.status_code in (401, 403):
-            raise ApiError(f"TeddyCloud: Zugriff verweigert (HTTP {r.status_code}, TC_AUTH prüfen)")
+            raise ApiError(t("TeddyCloud: Zugriff verweigert (HTTP {status}, TC_AUTH prüfen)", status=r.status_code))
         if r.status_code != 200:
             return None
         try:
@@ -374,9 +376,9 @@ class Tc:
                 status = None
                 log.warning("TeddyCloud Upload: %s, Versuch %d/%d", type(e).__name__, attempt, self.UPLOAD_TRIES)
             if status in (401, 403):
-                raise ApiError(f"TeddyCloud: Zugriff verweigert (HTTP {status}, TC_AUTH prüfen)")
+                raise ApiError(t("TeddyCloud: Zugriff verweigert (HTTP {status}, TC_AUTH prüfen)", status=status))
             if status is not None and status != 200 and status not in self.RETRY_STATUS:
-                raise ApiError(f"TeddyCloud Upload: HTTP {status}")
+                raise ApiError(t("TeddyCloud Upload: HTTP {status}", status=status))
             if status == 200:
                 got = last = self.file_size(rel_dir, name)
                 if got == size:
@@ -391,8 +393,8 @@ class Tc:
                 self.delete_file(f"{rel_dir}/{name}")
                 got = None
             time.sleep(min(2 * attempt, 8))
-        raise ApiError(f"TeddyCloud Upload: {name} kam unvollständig an ({last} von {size} Bytes, "
-                       f"{self.UPLOAD_TRIES} Versuche).")
+        raise ApiError(t("TeddyCloud Upload: {name} kam unvollständig an ({last} von {size} Bytes, {n} Versuche).",
+                         name=name, last=last, size=size, n=self.UPLOAD_TRIES))
 
     def encode(self, target, sources, wait=3600.0):
         """wait: so lange auf die Antwort warten (TeddyCloud antwortet erst, wenn die TAF fertig ist)."""

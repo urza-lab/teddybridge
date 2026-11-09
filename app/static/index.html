@@ -12,7 +12,8 @@
 body{margin:0;font:15px/1.4 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
 header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 header h1{font-size:17px;margin:0 8px 0 0}
-#logout{margin-left:auto}
+#langSel{margin-left:auto} #logout{margin-left:0}
+#langSel[hidden]+#logout{margin-left:auto}
 select,input,button{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
 button{cursor:pointer}
 button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
@@ -82,6 +83,7 @@ h3.sub{margin:22px 0 8px;font-size:15px;color:var(--mut)}
     <option value="media.duration:1" data-abs>Längste zuerst</option>
   </select>
   <input id="q" type="search" placeholder="Suchen…" aria-label="Suche">
+  <select id="langSel" aria-label="Sprache" title="Sprache" hidden><option value="de">Deutsch</option><option value="en">English</option></select>
   <form id="logout" method="post" action="/logout" hidden><button type="submit" title="Abmelden">Abmelden</button></form>
 </header>
 <div class="bar">
@@ -111,7 +113,7 @@ h3.sub{margin:22px 0 8px;font-size:15px;color:var(--mut)}
   <h3 style="margin-top:0">Mehr als 99 Dateien</h3>
   <p>TeddyCloud kann pro TAF höchstens 99 Dateien umwandeln. Diese Hörspiele sind grösser:</p>
   <ul id="bigList"></ul>
-  <p><b>Zusammenfügen:</b> eine TAF mit 99 Kapiteln; die kürzesten aufeinanderfolgenden Dateien werden verbunden (nur MP3).<br>
+  <p><b>Zusammenfügen:</b> eine TAF mit 99 Kapiteln; die kürzesten aufeinanderfolgenden Dateien werden verbunden.<br>
   <b>Aufteilen:</b> mehrere TAFs („Teil 1 von n“, gleichmässig).</p>
   <div class="btns"><button id="bigCancel">Abbrechen</button><button id="bigSkip">Diese weglassen</button><button id="bigSplit">Aufteilen</button><button id="bigMerge" class="primary">Zusammenfügen</button></div>
 </dialog>
@@ -121,15 +123,71 @@ h3.sub{margin:22px 0 8px;font-size:15px;color:var(--mut)}
 </div>
 <script>
 const $ = s => document.querySelector(s);
+const LANG = document.documentElement.lang==='en' ? 'en' : 'de';
+const LANG_FIXED = document.documentElement.dataset.langFixed==='1';
+const EN = {
+  'Sprache':'Language', 'Nach TeddyCloud (0)':'To TeddyCloud (0)', 'Dateien':'Files', 'Bibliothek':'Library', 'Alle':'All', 'Serien':'Series', 'Sammlungen':'Collections',
+  'Sortierung':'Sort order', 'Zuletzt hinzugefügt':'Recently added', 'Titel A–Z':'Title A–Z', 'Autor A–Z':'Author A–Z',
+  'Kürzeste zuerst':'Shortest first', 'Längste zuerst':'Longest first', 'Suchen…':'Search…', 'Suche':'Search',
+  'Abmelden':'Log out', 'Ablage':'Destination', 'Automatisch':'Automatic', 'Eigener Unterordner':'Custom subfolder',
+  'z. B. Weihnachten':'e.g. Christmas',
+  'Alle ausgewählten Hörbücher nacheinander in eine einzige TAF, in der Reihenfolge der Auswahl':'All selected audiobooks one after another in a single TAF, in the order of selection',
+  'als eine TAF':'as one TAF', 'Name der TAF':'Name of the TAF', 'Auswahl leeren':'Clear selection',
+  'Eigene Playlist':'Custom playlist', 'Name der Playlist':'Playlist name', 'Als eine TAF nach TeddyCloud':'To TeddyCloud as one TAF',
+  'Leeren':'Clear', 'Liste':'List', 'Mehr laden':'Load more', 'Nichts gefunden.':'Nothing found.',
+  'Mehr als 99 Dateien':'More than 99 files',
+  'TeddyCloud kann pro TAF höchstens 99 Dateien umwandeln. Diese Hörspiele sind grösser:':'TeddyCloud can encode at most 99 files per TAF. These audiobooks are larger:',
+  'Zusammenfügen:':'Merge:', 'eine TAF mit 99 Kapiteln; die kürzesten aufeinanderfolgenden Dateien werden verbunden.':'one TAF with 99 chapters; the shortest adjacent files are joined.',
+  'Aufteilen:':'Split:', 'mehrere TAFs („Teil 1 von n“, gleichmässig).':'several TAFs (“Part 1 of n”, evenly).',
+  'Abbrechen':'Cancel', 'Diese weglassen':'Skip these', 'Aufteilen':'Split', 'Zusammenfügen':'Merge',
+  'Warteschlange':'Queue', 'Erledigte entfernen':'Remove finished',
+  'wartend':'waiting', 'herunterladen':'downloading', 'hochladen':'uploading',
+  'vorbereiten (Kapitel schneiden/zusammenfügen) …':'preparing (cutting/merging chapters) …',
+  'TeddyCloud abgebrochen – warte und versuche neu …':'TeddyCloud aborted – waiting and retrying …',
+  'umwandeln …':'encoding …', 'fertig':'done', 'übersprungen (schon vorhanden)':'skipped (already present)', 'Fehler':'Error',
+  'Anmeldung erforderlich':'Login required',
+  'Bibliothek/Serie bzw. Autor':'library/series or author', 'Musikordner/Album-Künstler':'music folder/album artist', 'Freigabe/Ordnerpfad':'share/folder path',
+  'teddybridge (nur lesen)':'teddybridge (read-only)', 'Künstler':'Artists', 'Playlists':'Playlists', 'Ordner':'Folders',
+  'Automatisch: {p}':'Automatic: {p}',
+  'Kein Musikordner gefunden.':'No music folder found.', 'Keine Freigabe konfiguriert.':'No share configured.',
+  'Keine Hörbuch-Bibliothek gefunden.':'No audiobook library found.',
+  'Keine Unterordner und keine Audiodateien.':'No subfolders and no audio files.',
+  'Suche: „{q}“':'Search: “{q}”', ' (Ordnernamen)':' (folder names)', 'Titel':'Tracks',
+  '{n} Alben':'{n} albums', '{n} Folgen':'{n} episodes', '{n} Hörspiele':'{n} audiobooks',
+  'Keine Playlists in Navidrome. Eigene Playlist: Titel über „Titel“ bei einem Album oder über die Suche hinzufügen.':'No playlists in Navidrome. Custom playlist: add tracks via “Tracks” on an album or via search.',
+  '{n} Unterordner':'{n} subfolders', 'Folge {n}':'Episode {n}', '{n} Dateien':'{n} files',
+  'Ordner ▸':'Folder ▸', 'Unterordner anzeigen':'Show subfolders', 'Titel ▸':'Tracks ▸',
+  'Einzelne Titel für eine eigene Playlist':'Single tracks for a custom playlist', 'in TeddyCloud':'in TeddyCloud',
+  'Nach TeddyCloud ({n})':'To TeddyCloud ({n})', 'Als eine TAF ({n})':'As one TAF ({n})',
+  '‹ zurück':'‹ back', 'alle hinzufügen':'add all', 'Zur eigenen Playlist':'Add to custom playlist',
+  '{n} Titel':'{n} tracks', 'mehr als {n}: wird aufgeteilt':'more than {n}: will be split',
+  'Bitte einen Namen für die Playlist angeben.':'Please enter a name for the playlist.',
+  'Bitte Unterordner angeben.':'Please enter a subfolder.', 'Bitte einen Namen für die TAF angeben.':'Please enter a name for the TAF.',
+  'Nichts zu übertragen.':'Nothing to transfer.',
+  '{t} – {n} Dateien → 1 TAF mit {max} Kapiteln oder {p} Teile':'{t} – {n} files → 1 TAF with {max} chapters or {p} parts',
+  'Teil {k}/{n}':'part {k}/{n}', 'noch ca. {eta} (fertig ~{at})':'about {eta} left (done ~{at})', 'Achtung: {w}':'Warning: {w}',
+};
+function T(s, v){ let r = LANG==='en' ? (EN[s] ?? s) : s; if(v) for(const k in v) r=r.split('{'+k+'}').join(v[k]); return r; }
+function translateDom(root){
+  if(LANG==='de') return;
+  const w=document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for(let n; (n=w.nextNode());){ const k=n.nodeValue.trim(); if(k && EN[k]!=null) n.nodeValue=n.nodeValue.replace(k, EN[k]); }
+  for(const e of root.querySelectorAll('[placeholder],[title],[aria-label]'))
+    for(const a of ['placeholder','title','aria-label']) if(e.hasAttribute(a) && EN[e.getAttribute(a)]!=null) e.setAttribute(a, EN[e.getAttribute(a)]);
+}
+function setLang(l){
+  try{ document.cookie=`tb_lang=${l}; path=/; max-age=31536000; samesite=strict`; }catch(e){}
+  location.reload();
+}
 const st = {mix:[], src:'abs', lib:null, libs:[], view:'all', page:0, total:0, items:[], sel:new Map(), present:new Set(), coll:null, q:'', max:99};
 const PAGE = 48;
 const ACTIVE = ['downloading','preparing','uploading','encoding'];
 const fmtEta = s => s>=3600 ? `${Math.floor(s/3600)} h ${String(Math.floor(s%3600/60)).padStart(2,'0')} min` : `${Math.max(1,Math.round(s/60))} min`;
-const LABEL = {waiting:'wartend', downloading:'herunterladen', uploading:'hochladen', preparing:'vorbereiten (Kapitel schneiden/zusammenfügen) …', retrying:'TeddyCloud abgebrochen – warte und versuche neu …', encoding:'umwandeln …', done:'fertig', skipped:'übersprungen (schon vorhanden)', error:'Fehler'};
+const LABEL = {waiting:'wartend', downloading:'herunterladen', uploading:'hochladen', preparing:'vorbereiten (Kapitel schneiden/zusammenfügen) …', retrying:'TeddyCloud abgebrochen – warte und versuche neu …', encoding:'umwandeln …', done:'fertig', skipped:'übersprungen (schon vorhanden)', error:'Fehler'};  // übersetzt bei der Anzeige
 
 async function api(path, opt){
   const r = await fetch(path, opt);
-  if(r.status===401){ location.href='/login'; throw new Error('Anmeldung erforderlich'); }
+  if(r.status===401){ location.href='/login'; throw new Error(T('Anmeldung erforderlich')); }
   const j = await r.json().catch(()=>({}));
   if(!r.ok) throw new Error(j.error || j.detail?.[0]?.msg || j.detail || ('HTTP '+r.status));
   return j;
@@ -146,7 +204,7 @@ async function init(){
   try{
     const cfg = await api('/api/config'); st.max=cfg.maxFiles; st.base=cfg.tcBase;
     if(cfg.auth) $('#logout').hidden=false;
-    if(cfg.readonly){ st.readonly=true; document.querySelector('header h1').textContent='teddybridge (nur lesen)'; }
+    if(cfg.readonly){ st.readonly=true; document.querySelector('header h1').textContent=T('teddybridge (nur lesen)'); }
     document.querySelectorAll('.base').forEach(e=>e.textContent=cfg.tcBase);
     const so=load('sort'); if(so&&[...$('#sort').options].some(o=>o.value===so)) $('#sort').value=so;
     const srcs=(cfg.sources&&cfg.sources.length)?cfg.sources:['abs'];
@@ -161,12 +219,12 @@ async function selectSrc(src){
   st.src=src; store('src',src); msg('');
   for(const b of document.querySelectorAll('#srcTabs button')) b.classList.toggle('on',b.dataset.src===src);
   const nd=src==='nd', fs=src==='fs';
-  $('#tSer').textContent=nd?'Künstler':'Serien'; $('#tCol').textContent=nd?'Playlists':'Sammlungen';
-  $('#tAll').textContent=fs?'Ordner':'Alle'; $('#tSer').hidden=fs; $('#tCol').hidden=fs; $('#sort').hidden=fs; st.path='-';
+  $('#tSer').textContent=T(nd?'Künstler':'Serien'); $('#tCol').textContent=T(nd?'Playlists':'Sammlungen');
+  $('#tAll').textContent=T(fs?'Ordner':'Alle'); $('#tSer').hidden=fs; $('#tCol').hidden=fs; $('#sort').hidden=fs; st.path='-';
   renderMix();
   for(const o of $('#sort').options) if(o.hasAttribute('data-abs')) o.hidden=nd;
   if(nd&&$('#sort').selectedOptions[0]?.hidden) $('#sort').value='media.metadata.title:0';
-  $('#mode').options[0].textContent=`Automatisch: ${st.base}/${AUTO[src]}`;
+  $('#mode').options[0].textContent=T('Automatisch: {p}',{p:`${st.base}/${T(AUTO[src])}`});
   $('#lib').replaceChildren(); st.items=[]; $('#grid').replaceChildren();
   try{
     st.libs = await api(`${B()}/libraries`);
@@ -174,7 +232,7 @@ async function selectSrc(src){
     const saved=load('lib_'+src)||(src==='abs'?load('lib'):null);
     if(st.libs.some(l=>l.id===saved)) $('#lib').value=saved;
     if(st.libs.length) selectLib($('#lib').value);
-    else msg(nd?'Kein Musikordner gefunden.':fs?'Keine Freigabe konfiguriert.':'Keine Hörbuch-Bibliothek gefunden.');
+    else msg(T(nd?'Kein Musikordner gefunden.':fs?'Keine Freigabe konfiguriert.':'Keine Hörbuch-Bibliothek gefunden.'));
   }catch(e){msg(e.message);}
 }
 function selectLib(id){
@@ -201,7 +259,7 @@ async function browse(path){
       if(i<d.crumbs.length-1){ const a=el('a',null,x.name); a.onclick=()=>browse(x.id); c.append(a); } else c.append(x.name);
     });
     st.items=(d.here.item?[d.here]:[]).concat(d.entries); st.total=st.items.length; render();
-    if(!st.items.length){ $('#empty').hidden=false; $('#empty').textContent='Keine Unterordner und keine Audiodateien.'; }
+    if(!st.items.length){ $('#empty').hidden=false; $('#empty').textContent=T('Keine Unterordner und keine Audiodateien.'); }
   }catch(e){msg(e.message);}
 }
 async function loadPage(){
@@ -216,9 +274,9 @@ async function loadPage(){
 async function search(q){
   $('#songs').hidden=true;
   st.q=q; if(!q){return st.src==='fs'?browse(st.path||'-'):st.view==='coll'?openColl(st.coll):st.view==='ser'?openSeries(st.ser,st.serName):showAll();}
-  tab('search'); $('#crumb').textContent=`Suche: „${q}“`+(st.src==='fs'?' (Ordnernamen)':'');
+  tab('search'); $('#crumb').textContent=T('Suche: „{q}“',{q})+(st.src==='fs'?T(' (Ordnernamen)'):'');
   try{ const d=await api(`${B()}/libraries/${st.lib}/search?q=${encodeURIComponent(q)}`); st.items=d.items; st.total=d.items.length; render();
-       if(d.songs&&d.songs.length){ $('#empty').hidden=true; renderSongs(d.songs, 'Titel'); } }
+       if(d.songs&&d.songs.length){ $('#empty').hidden=true; renderSongs(d.songs, T('Titel')); } }
   catch(e){msg(e.message);}
 }
 async function showSeries(){
@@ -231,14 +289,14 @@ async function showSeries(){
       const t=el('div','tile');
       const cov=s.cover||(s.coverId?`/api/cover/${s.coverId}`:null);
       if(cov){const img=el('img'); img.loading='lazy'; img.alt=''; img.src=cov; img.onerror=()=>img.replaceWith(el('div','ph')); t.append(img);} else t.append(el('div','ph'));
-      const m=el('div','meta'); m.append(el('div','t',s.name), el('div','s',`${s.count} ${st.src==='nd'?'Alben':'Folgen'}`)); t.append(m);
+      const m=el('div','meta'); m.append(el('div','t',s.name), el('div','s',T(st.src==='nd'?'{n} Alben':'{n} Folgen',{n:s.count}))); t.append(m);
       t.onclick=()=>openSeries(s.id,s.name); g.append(t);
     }
   }catch(e){msg(e.message);}
 }
 async function openSeries(id,name){
   tab('ser'); st.ser=id; st.serName=name; st.page=0; st.items=[];
-  const c=$('#crumb'); c.replaceChildren(); const a=el('a',null,st.src==='nd'?'Künstler':'Serien'); a.onclick=showSeries; c.append(a,' › '+name);
+  const c=$('#crumb'); c.replaceChildren(); const a=el('a',null,T(st.src==='nd'?'Künstler':'Serien')); a.onclick=showSeries; c.append(a,' › '+name);
   await loadPage();
 }
 async function showCols(){
@@ -246,7 +304,7 @@ async function showCols(){
   const g=$('#grid'); g.replaceChildren(); $('#more').hidden=true; $('#songs').hidden=true;
   if(st.src==='nd'){
     try{ st.items=await api('/api/nd/playlists'); st.total=st.items.length; render();
-         if(!st.items.length){ $('#empty').hidden=false; $('#empty').textContent='Keine Playlists in Navidrome. Eigene Playlist: Titel über „Titel“ bei einem Album oder über die Suche hinzufügen.'; } }
+         if(!st.items.length){ $('#empty').hidden=false; $('#empty').textContent=T('Keine Playlists in Navidrome. Eigene Playlist: Titel über „Titel“ bei einem Album oder über die Suche hinzufügen.'); } }
     catch(e){msg(e.message);}
     return;
   }
@@ -254,7 +312,7 @@ async function showCols(){
     const cols=await api(`/api/libraries/${st.lib}/collections`);
     $('#empty').hidden=cols.length>0;
     for(const c of cols){
-      const t=el('div','tile coll'); t.append(el('div','t',c.name), el('div','s',`${c.count} Hörspiele`));
+      const t=el('div','tile coll'); t.append(el('div','t',c.name), el('div','s',T('{n} Hörspiele',{n:c.count})));
       t.onclick=()=>openColl(c.id); g.append(t);
     }
   }catch(e){msg(e.message);}
@@ -263,17 +321,17 @@ async function openColl(id){
   tab('coll'); st.coll=id;
   try{
     const d=await api(`/api/libraries/${st.lib}/collections/${id}`);
-    const c=$('#crumb'); c.replaceChildren(); const a=el('a',null,'Sammlungen'); a.onclick=showCols; c.append(a, ' › '+d.name);
+    const c=$('#crumb'); c.replaceChildren(); const a=el('a',null,T('Sammlungen')); a.onclick=showCols; c.append(a, ' › '+d.name);
     st.items=d.items; st.total=d.items.length; render();
   }catch(e){msg(e.message);}
 }
 
 function render(){
   const g=$('#grid'); g.replaceChildren(); $('#songs').hidden=true;
-  $('#empty').hidden=st.items.length>0; $('#empty').textContent='Nichts gefunden.';
+  $('#empty').hidden=st.items.length>0; $('#empty').textContent=T('Nichts gefunden.');
   for(const it of st.items){
     if(it.source==='fs'&&!it.item){  // reiner Ordner: hineinnavigieren
-      const t=el('div','tile coll'); t.append(el('div','t','📁 '+it.title), el('div','s',`${it.dirs} Unterordner`));
+      const t=el('div','tile coll'); t.append(el('div','t','📁 '+it.title), el('div','s',T('{n} Unterordner',{n:it.dirs})));
       t.onclick=()=>{ $('#q').value=''; st.q=''; browse(it.id); }; g.append(t); continue;
     }
     const t=el('div','tile'); t.dataset.id=it.id; t.dataset.mark=it.mark||it.id.slice(0,8);
@@ -281,20 +339,20 @@ function render(){
     if(cov){const img=el('img'); img.loading='lazy'; img.alt=''; img.src=cov; img.onerror=()=>img.replaceWith(el('div','ph')); t.append(img);}
     else t.append(el('div','ph'));
     const m=el('div','meta');
-    if(it.seq) m.append(el('div','ep','Folge '+(/^\d+$/.test(it.seq)?String(parseInt(it.seq,10)):it.seq)));
+    if(it.seq) m.append(el('div','ep',T('Folge {n}',{n:/^\d+$/.test(it.seq)?String(parseInt(it.seq,10)):it.seq})));
     m.append(el('div','t',it.title));
     const sub=[it.series,it.author].filter(Boolean).join(' · '); if(sub) m.append(el('div','s',sub));
-    m.append(el('div','s',[it.duration?dur(it.duration):'', it.files!=null?`${it.files} Dateien`:''].filter(Boolean).join(' · ')));
+    m.append(el('div','s',[it.duration?dur(it.duration):'', it.files!=null?T('{n} Dateien',{n:it.files}):''].filter(Boolean).join(' · ')));
     if(it.source==='fs'&&it.dirs&&it.id!==st.path){
-      const b=el('button','tr','Ordner ▸'); b.title='Unterordner anzeigen';
+      const b=el('button','tr',T('Ordner ▸')); b.title=T('Unterordner anzeigen');
       b.onclick=e=>{e.stopPropagation(); $('#q').value=''; st.q=''; browse(it.id);}; m.append(b);
     }
     if(st.src==='nd'&&it.kind!=='playlist'){
-      const b=el('button','tr','Titel ▸'); b.title='Einzelne Titel für eine eigene Playlist';
+      const b=el('button','tr',T('Titel ▸')); b.title=T('Einzelne Titel für eine eigene Playlist');
       b.onclick=e=>{e.stopPropagation(); openAlbumSongs(it);}; m.append(b);
     }
     t.append(m, el('div','check','✓'));
-    if(it.files>st.max) t.append(el('span','badge warn',`${it.files} Dateien`));
+    if(it.files>st.max) t.append(el('span','badge warn',T('{n} Dateien',{n:it.files})));
     t.onclick=()=>toggle(it);
     g.append(t);
   }
@@ -305,12 +363,12 @@ function markTiles(){
   for(const t of document.querySelectorAll('.tile[data-id]')){
     const id=t.dataset.id; t.classList.toggle('sel',st.sel.has(id));
     let b=t.querySelector('.badge:not(.warn)');
-    if(st.present.has(t.dataset.mark)){ if(!b){b=el('span','badge','in TeddyCloud'); t.append(b);} }
+    if(st.present.has(t.dataset.mark)){ if(!b){b=el('span','badge',T('in TeddyCloud')); t.append(b);} }
     else if(b) b.remove();
   }
-  const n=st.sel.size; $('#send').textContent=`Nach TeddyCloud (${n})`; $('#send').disabled=!n||st.readonly;
+  const n=st.sel.size; $('#send').textContent=T('Nach TeddyCloud ({n})',{n}); $('#send').disabled=!n||st.readonly;
   $('#bundleWrap').hidden=n<2; const bundle=n>=2&&$('#bundle').checked; $('#bundleName').hidden=!bundle;
-  if(bundle) $('#send').textContent=`Als eine TAF (${n})`;
+  if(bundle) $('#send').textContent=T('Als eine TAF ({n})',{n});
   const order=[...st.sel.keys()];  // Reihenfolge der Sammel-TAF = Reihenfolge der Auswahl
   for(const t of document.querySelectorAll('.tile[data-id]')){
     const c=t.querySelector('.check'); if(!c) continue;
@@ -322,10 +380,10 @@ async function openAlbumSongs(it){
   try{
     const d=await api(`/api/nd/albums/${it.id}/songs`);
     $('#grid').replaceChildren(); $('#more').hidden=true; $('#empty').hidden=true;
-    const c=$('#crumb'); c.replaceChildren(); const a=el('a',null,'‹ zurück');
+    const c=$('#crumb'); c.replaceChildren(); const a=el('a',null,T('‹ zurück'));
     a.onclick=()=>{ st.view=back.view; st.items=back.items; st.total=back.total; render(); $('#crumb').replaceChildren(...back.crumb); };
     c.append(a, ` · ${d.name} – `);
-    const all=el('a',null,'alle hinzufügen'); all.onclick=()=>{ for(const s of d.songs) addMix(s); renderSongs(d.songs); }; c.append(all);
+    const all=el('a',null,T('alle hinzufügen')); all.onclick=()=>{ for(const s of d.songs) addMix(s); renderSongs(d.songs); }; c.append(all);
     renderSongs(d.songs);
   }catch(e){msg(e.message);}
 }
@@ -335,7 +393,7 @@ function renderSongs(songs, heading){
   for(const s of songs){
     const li=el('li'); const inMix=st.mix.some(x=>x.id===s.id); li.classList.toggle('in',inMix);
     const n=el('div','n'); n.append(el('span',null,s.title+' '), el('small',null,`${s.artist} · ${s.album} · ${dur(s.duration)}`));
-    const b=el('button','add',inMix?'✓':'+'); b.title='Zur eigenen Playlist';
+    const b=el('button','add',inMix?'✓':'+'); b.title=T('Zur eigenen Playlist');
     b.onclick=()=>{ inMix&&st.mix.some(x=>x.id===s.id)?removeMix(s.id):addMix(s); renderSongs(songs, heading); };
     li.append(n,b); ul.append(li);
   }
@@ -345,7 +403,7 @@ function removeMix(id){ st.mix=st.mix.filter(x=>x.id!==id); renderMix(); }
 function renderMix(){
   $('#mix').hidden=!(st.src==='nd'&&st.mix.length);
   const total=st.mix.reduce((a,s)=>a+(s.duration||0),0);
-  $('#mixInfo').textContent=`${st.mix.length} Titel · ${dur(total)}${st.mix.length>st.max?` · mehr als ${st.max}: wird aufgeteilt`:''}`;
+  $('#mixInfo').textContent=`${T('{n} Titel',{n:st.mix.length})} · ${dur(total)}${st.mix.length>st.max?' · '+T('mehr als {n}: wird aufgeteilt',{n:st.max}):''}`;
   const ol=$('#mixList'); ol.replaceChildren();
   st.mix.forEach((s,i)=>{
     const li=el('li',null,`${s.title} – ${s.artist}`);
@@ -360,9 +418,9 @@ function renderMix(){
 }
 async function sendMix(){
   const name=$('#mixName').value.trim();
-  if(!name){ msg('Bitte einen Namen für die Playlist angeben.'); $('#mixName').focus(); return; }
+  if(!name){ msg(T('Bitte einen Namen für die Playlist angeben.')); $('#mixName').focus(); return; }
   const custom=$('#mode').value==='custom'; const subfolder=custom?$('#folder').value.trim():null;
-  if(custom&&!subfolder){ msg('Bitte Unterordner angeben.'); $('#folder').focus(); return; }
+  if(custom&&!subfolder){ msg(T('Bitte Unterordner angeben.')); $('#folder').focus(); return; }
   $('#mixSend').disabled=true; msg('');
   try{
     await api('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subfolder,
@@ -382,7 +440,7 @@ async function refreshPresent(){
 function askBig(big){
   return new Promise(res=>{
     const ul=$('#bigList'); ul.replaceChildren();
-    for(const it of big){ const parts=Math.ceil(it.files/st.max); ul.append(el('li',null,`${it.title} – ${it.files} Dateien → 1 TAF mit ${st.max} Kapiteln oder ${parts} Teile`)); }
+    for(const it of big){ const parts=Math.ceil(it.files/st.max); ul.append(el('li',null,T('{t} – {n} Dateien → 1 TAF mit {max} Kapiteln oder {p} Teile',{t:it.title,n:it.files,max:st.max,p:parts}))); }
     const d=$('#big'); const done=v=>{d.close(); res(v);};
     $('#bigSplit').onclick=()=>done('split'); $('#bigMerge').onclick=()=>done('merge'); $('#bigSkip').onclick=()=>done('skip'); $('#bigCancel').onclick=()=>done(null);
     d.oncancel=()=>res(null);
@@ -394,17 +452,17 @@ async function send(){
   if(!st.sel.size) return;
   const custom=$('#mode').value==='custom';
   const subfolder=custom?$('#folder').value.trim():null;
-  if(custom&&!subfolder){ msg('Bitte Unterordner angeben.'); $('#folder').focus(); return; }
+  if(custom&&!subfolder){ msg(T('Bitte Unterordner angeben.')); $('#folder').focus(); return; }
   let items=[...st.sel.values()].map(it=>({id:it.id,title:it.title,files:it.files,source:it.source||'abs',lib:it.lib,kind:it.kind||'album'}));
   const bundle=items.length>=2&&$('#bundle').checked?$('#bundleName').value.trim():null;
-  if(items.length>=2&&$('#bundle').checked&&!bundle){ msg('Bitte einen Namen für die TAF angeben.'); $('#bundleName').focus(); return; }
+  if(items.length>=2&&$('#bundle').checked&&!bundle){ msg(T('Bitte einen Namen für die TAF angeben.')); $('#bundleName').focus(); return; }
   const big=bundle?[]:items.filter(it=>it.files>st.max);  // Sammel-TAF: über 99 Kapitel wird automatisch zusammengefügt
   let split=false, merge=false;
   if(big.length){
     const choice=await askBig(big);
     if(!choice) return;
     if(choice==='skip') items=items.filter(it=>!(it.files>st.max)); else if(choice==='merge') merge=true; else split=true;
-    if(!items.length){ msg('Nichts zu übertragen.'); return; }
+    if(!items.length){ msg(T('Nichts zu übertragen.')); return; }
   }
   items=items.map(it=>({id:it.id,title:it.title,source:it.source,kind:it.kind,lib:(it.source==='nd'||it.source==='fs')?String(it.lib):null,split:split&&it.files>st.max,merge:merge&&it.files>st.max}));
   $('#send').disabled=true; msg('');
@@ -423,20 +481,20 @@ async function poll(){
     for(const j of jobs.slice().reverse()){
       const d=el('div','job '+j.state);
       d.append(el('div',null,j.title));
-      let s=LABEL[j.state]||j.state;
+      let s=T(LABEL[j.state]||j.state);
       if((j.state==='downloading'||j.state==='uploading')&&j.m) s+=` ${j.n}/${j.m}`;
       if(j.state==='error'&&j.error) s+=': '+j.error;
-      if(j.state==='encoding'&&j.parts>1) s+=` Teil ${j.part}/${j.parts}`;
+      if(j.state==='encoding'&&j.parts>1) s+=' '+T('Teil {k}/{n}',{k:j.part,n:j.parts});
       if(j.state==='encoding'&&j.pct!=null) s+=` ${j.pct} %`;
       if(ACTIVE.includes(j.state)&&j.eta>0){
-        const at=new Date(Date.now()+j.eta*1000).toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit'});
-        s+=` · noch ca. ${fmtEta(j.eta)} (fertig ~${at})`;
+        const at=new Date(Date.now()+j.eta*1000).toLocaleTimeString(LANG==='en'?'en-GB':'de-CH',{hour:'2-digit',minute:'2-digit'});
+        s+=' · '+T('noch ca. {eta} (fertig ~{at})',{eta:fmtEta(j.eta),at});
       }
       if(j.folder) s+=' · '+j.folder;
       if(j.state==='done'&&j.taf) s+=' / '+j.taf;
       if(j.note) s+=' · '+j.note;
       if(j.check) s+=` · ${j.check} ${j.warning?'⚠':'✓'}`;
-      if(j.warning) s+=' – Achtung: '+j.warning;
+      if(j.warning) s+=' – '+T('Achtung: {w}',{w:j.warning});
       d.append(el('div','st',s));
       if(ACTIVE.includes(j.state)&&j.m){  // ein Balken je Phase: erst Übertragen, dann Umwandeln
         const p=el('div','prog'), b=el('div');
@@ -470,6 +528,9 @@ $('#mixToggle').onclick=()=>{ $('#mixList').hidden=!$('#mixList').hidden; };
 $('#none').onclick=()=>{st.sel.clear(); markTiles();};
 $('#clr').onclick=async()=>{await api('/api/jobs/clear',{method:'POST'}); poll();};
 $('#hide').onclick=()=>{$('#queue').hidden=true; $('#queue').dataset.closed='1';};
+$('#langSel').value=LANG; $('#langSel').hidden=LANG_FIXED;
+$('#langSel').onchange=e=>setLang(e.target.value);
+translateDom(document.body);
 init();
 </script>
 </body>

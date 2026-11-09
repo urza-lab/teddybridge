@@ -14,6 +14,7 @@ import shutil
 import subprocess
 
 from .clients import ApiError
+from .i18n import t
 from .mp3cat import merge_groups
 
 OUT_EXT = {"m4b": "m4a", "m4a": "m4a", "mp4": "m4a", "aac": "m4a", "mp3": "mp3", "ogg": "ogg", "oga": "ogg",
@@ -29,13 +30,13 @@ def _run(cmd, what, timeout):
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired) as e:
-        raise ApiError(f"{what}: {type(e).__name__}") from None
+        raise ApiError(f"{t(what)}: {type(e).__name__}") from None
     if r.returncode != 0:
         last = ((r.stderr or "").strip().splitlines()[-1:] or ["?"])[0]
         for arg in cmd:  # keine lokalen Pfade in Meldungen
             if os.sep in arg:
                 last = last.replace(arg, os.path.basename(arg))
-        raise ApiError(f"{what} fehlgeschlagen: {last[:200]}")
+        raise ApiError(t("{what} fehlgeschlagen: {detail}", what=t(what), detail=last[:200]))
     return r.stdout
 
 
@@ -48,7 +49,7 @@ def probe(path):
         total = float((d.get("format") or {}).get("duration") or 0)
         chs = [(float(c["start_time"]), float(c["end_time"])) for c in d.get("chapters") or []]
     except (ValueError, KeyError, TypeError):
-        raise ApiError("Kapitel lesen: unerwartete Ausgabe von ffprobe") from None
+        raise ApiError(t("Kapitel lesen: unerwartete Ausgabe von ffprobe")) from None
     chs = sorted(c for c in chs if c[1] - c[0] >= MIN_CHAPTER)
     return chs, total
 
@@ -64,7 +65,7 @@ def cut(path, ext, start, end, dest_base):
     """Bereich verlustfrei herausschneiden (-c copy). -> Pfad (Endung passend zum Format)."""
     out_ext = OUT_EXT.get((ext or "").lower().lstrip("."))
     if not out_ext:
-        raise ApiError(f"Format .{ext} kann nicht geschnitten werden")
+        raise ApiError(t("Format .{ext} kann nicht geschnitten werden", ext=ext))
     dest = f"{dest_base}.{out_ext}"
     cmd = ["ffmpeg", "-nostdin", "-v", "error", "-y", "-ss", f"{start or 0:.3f}", "-i", path]
     if end is not None:
@@ -72,7 +73,7 @@ def cut(path, ext, start, end, dest_base):
     cmd += ["-map", "0:a:0", "-c", "copy", "-map_chapters", "-1", "-map_metadata", "-1", dest]
     _run(cmd, "Kapitel schneiden", 1800)
     if not os.path.exists(dest) or os.path.getsize(dest) == 0:
-        raise ApiError("Kapitel schneiden: leeres Ergebnis")
+        raise ApiError(t("Kapitel schneiden: leeres Ergebnis"))
     return dest
 
 
@@ -96,7 +97,7 @@ def join(parts, dest_base):
             "-map_metadata", "-1", dest]
     _run(cmd, "Zusammenfügen", 3600)
     if not os.path.exists(dest) or os.path.getsize(dest) == 0:
-        raise ApiError("Zusammenfügen: leeres Ergebnis")
+        raise ApiError(t("Zusammenfügen: leeres Ergebnis"))
     return dest
 
 

@@ -2,7 +2,7 @@
 
 A web UI to browse audiobooks, radio plays and music from **Audiobookshelf**, **Navidrome** or a **NAS folder** and transfer them with one click as **TAF files** into the library of **[TeddyCloud](https://github.com/toniebox-reverse-engineering/teddycloud)**. You then assign them to a Tonie in TeddyCloud as usual.
 
-> **Note:** The user interface is in German. This README, the configuration and the logs use plain variable names, so setup works without German.
+> **Languages:** The user interface is available in **English and German** – it follows the browser language and can be switched in the header, or pinned with `UI_LANG`. Logs are in German.
 
 ---
 
@@ -38,7 +38,7 @@ The queue lives in memory only. A restart discards pending jobs; this is intende
 A TAF can have at most 99 chapters (one source file = one chapter). With more files the UI asks:
 
 - **Merge** (default): a single TAF with 99 chapters. teddybridge repeatedly joins the two adjacent files with the shortest combined duration until 99 remain – so only the boundaries between the shortest chapters disappear. **MP3** is concatenated losslessly (no re-encoding, no extra tool); each merged file keeps the usual MP3 encoder gap of about 35 ms. **Other formats** (m4a, FLAC, Ogg …) and MP3 with differing sample rate or mono/stereo are joined with **ffmpeg** into one FLAC chapter (lossless relative to the source; TeddyCloud encodes to Opus afterwards anyway). Without ffmpeg, merging only works for uniform MP3.
-- **Split:** several TAFs `<title> - Teil k von n [<id>-k].taf` with the same number of files each; if a part is missing later, only that part is transferred again.
+- **Split:** several TAFs `<title> - Part k of n [<id>-k].taf` (German: `Teil k von n`) with the same number of files each; if a part is missing later, only that part is transferred again.
 - **Skip.**
 
 An audiobook counts as present in either form: if parts already exist, it is not merged in addition (and vice versa).
@@ -49,7 +49,7 @@ If **ffmpeg** is installed (optional), an audiobook consisting of a single file 
 
 ### Several audiobooks in one TAF
 
-With two or more selected items you can choose “**als eine TAF**” (“as one TAF”) with a name of your choice. All items – even from different sources (ABS, Navidrome, file source) – end up in one TAF **in the order you selected them** (the tiles then show 1, 2, 3 …); each audiobook keeps its chapters. If together they exceed 99 chapters, they are merged automatically, but across the boundary between two audiobooks only if there is no other way. Placement: `TC_BASE/Sammlungen` or your own subfolder. Marker `k` + hash over the selection: the same selection in the same order is skipped, even under a different name.
+With two or more selected items you can choose “**as one TAF**” with a name of your choice. All items – even from different sources (ABS, Navidrome, file source) – end up in one TAF **in the order you selected them** (the tiles then show 1, 2, 3 …); each audiobook keeps its chapters. If together they exceed 99 chapters, they are merged automatically, but across the boundary between two audiobooks only if there is no other way. Placement: `TC_BASE/Collections` (German UI: `Sammlungen`) or your own subfolder. Marker `k` + hash over the selection: the same selection in the same order is skipped, even under a different name.
 
 ### File source (NAS)
 
@@ -96,6 +96,7 @@ Both empty = **no login** (warning in the log). Only one set or invalid hash = s
 | `LISTEN` | `0.0.0.0:8085` | Address and port |
 | `TRUSTED_PROXIES` | – | IP(s) of the reverse proxy, comma-separated (single IPs only). Then `X-Forwarded-For/-Proto` are honored: real client IP in the log, cookie with `Secure` on HTTPS. |
 | `DISCORD_WEBHOOK` | – | Discord webhook URL: message per job (done/error) and summary per batch. Read only at startup. |
+| `UI_LANG` | – | `en` or `de` pins the language of the UI, error messages, Discord messages and folder names (e.g. `Collections`/`Sammlungen`); the language selector is hidden. Empty: browser language (English if it is neither), switchable in the header; a job uses the language of the browser that queued it. |
 
 No comments after values: systemd treats them as part of the value.
 
@@ -191,7 +192,7 @@ venv/bin/python tests/test_e2e.py     # end-to-end against mock servers
 venv/bin/python tests/test_audio.py   # MP3 merging and m4b chapters with real audio files (needs ffmpeg)
 ```
 
-Starts mock servers for Audiobookshelf, Navidrome and TeddyCloud (`mock/`) plus a simulated NAS directory and checks login, browsing, transfer, duplicates, splitting, merging (verified byte by byte, or every chapter decoded and measured), m4b chapters (ABS and file source), multi-audiobook TAFs, starting with only one source, cleanup on errors, path escapes, security headers, and that **no secret appears in the log or UI**. Passwords in tests and mocks are made up.
+Starts mock servers for Audiobookshelf, Navidrome and TeddyCloud (`mock/`) plus a simulated NAS directory and checks login, browsing, transfer, duplicates, splitting, merging (verified byte by byte, or every chapter decoded and measured), m4b chapters (ABS and file source), multi-audiobook TAFs, starting with only one source, both languages, cleanup on errors, path escapes, security headers, and that **no secret appears in the log or UI**. Passwords in tests and mocks are made up.
 
 ## Security
 
