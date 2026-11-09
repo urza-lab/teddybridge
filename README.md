@@ -166,7 +166,7 @@ docker compose run --rm -it teddybridge python -m app.pwhash    # password hash 
 docker compose up -d teddybridge
 ```
 
-Update: `docker compose pull teddybridge && docker compose up -d teddybridge`. To build it yourself instead of using the prebuilt image: clone the repo and use `build: ./teddybridge` instead of `image:` in the compose file.
+Update: `docker compose pull teddybridge && docker compose up -d teddybridge` – only while the queue is empty: the queue lives in memory, so a running transfer is lost (TeddyCloud may still finish an encode that was already running; transfer the item again afterwards, teddybridge then skips it or reports an incomplete TAF). To build it yourself instead of using the prebuilt image: clone the repo and use `build: ./teddybridge` instead of `image:` in the compose file.
 
 Without TeddyCloud in Docker on the same host, it works just as well as a standalone container, e.g. with `network_mode: host` and `TC_URL` pointing to the TeddyCloud address.
 
