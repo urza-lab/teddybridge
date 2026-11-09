@@ -151,10 +151,36 @@ Hinweise: Ein Neustart des Containers verwirft die Warteschlange (wie beim syste
 
 ## TeddyCloud-Plugin (optional)
 
-TeddyCloud zeigt jeden Ordner unter `<teddycloud-data>/www/plugins/` als Menüpunkt im Plugins-Reiter. `plugin/teddybridge/index.html` öffnet von dort aus teddybridge:
+TeddyCloud zeigt jeden Ordner unter `/teddycloud/data/www/plugins/` als Menüpunkt im Reiter *Plugins*. Die Vorlage `plugin/teddybridge/index.html` öffnet von dort aus teddybridge. Das geschieht **nicht automatisch**, auch nicht im selben Compose-Stack: teddybridge schreibt bewusst nur über das API in die Bibliothek, nie in TeddyCloud selbst.
 
-1. In der Datei `TEDDYBRIDGE_URL` (zweimal) durch die Adresse von teddybridge ersetzen, z. B. `https://teddybridge.example.lan/` oder `http://<host>:8085/`.
-2. Den Ordner `plugin/teddybridge` nach `<teddycloud-data>/www/plugins/` kopieren.
+Als Adresse gehört in das Plugin die URL, unter der **der Browser** teddybridge erreicht, z. B. `https://teddybridge.example.lan/` oder `http://<host>:8085/`, nicht der Docker-Dienstname.
+
+**TeddyCloud in Docker**
+
+Die offizielle TeddyCloud-Compose hat dafür ein eigenes Volume `plugins` (`/teddycloud/data/www/plugins`); was dort liegt, übersteht Updates von TeddyCloud. Im Docker-Host, `<host>` durch die Adresse von teddybridge ersetzen:
+
+```sh
+mkdir -p /tmp/teddybridge-plugin/teddybridge
+curl -fsSL https://raw.githubusercontent.com/urza-lab/teddybridge/main/plugin/teddybridge/index.html \
+  | sed 's#TEDDYBRIDGE_URL#http://<host>:8085/#g' > /tmp/teddybridge-plugin/teddybridge/index.html
+docker cp /tmp/teddybridge-plugin/teddybridge teddycloud:/teddycloud/data/www/plugins/
+```
+
+`teddycloud` ist der Containername (`docker ps` zeigt ihn). Ein Neustart ist nicht nötig; nach dem Neuladen der TeddyCloud-Seite erscheint unter *Plugins* der Eintrag „teddybridge“. Ändert sich die Adresse, die Befehle mit der neuen URL wiederholen.
+
+Fehlt in der eigenen Compose das Volume `plugins`, wäre ein kopiertes Plugin beim nächsten Update weg. Dann den Ordner stattdessen einbinden, beim Dienst `teddycloud`:
+
+```yaml
+    volumes:
+      # … bestehende Einträge …
+      - ./plugins/teddybridge:/teddycloud/data/www/plugins/teddybridge:ro
+```
+
+(Datei dafür mit dem `curl … | sed …` oben nach `./plugins/teddybridge/index.html` schreiben, dann `docker compose up -d teddycloud`. Das startet TeddyCloud kurz neu, also nicht während einer laufenden Übertragung.)
+
+**TeddyCloud ohne Docker**
+
+In `plugin/teddybridge/index.html` jedes `TEDDYBRIDGE_URL` (dreimal) durch die Adresse ersetzen, z. B. mit dem `sed` oben, und den Ordner `teddybridge` nach `<teddycloud-data>/www/plugins/` kopieren.
 
 teddybridge lässt sich aus Sicherheitsgründen nicht in einen fremden Rahmen einbetten (`frame-ancestors 'none'`). Das Plugin leitet darum das ganze Fenster weiter; erlaubt der Browser das ohne Klick nicht, erscheint ein Knopf „teddybridge öffnen“.
 
