@@ -136,6 +136,8 @@ chmod 600 teddybridge.env
 # TC_URL=http://teddycloud (service name from the TeddyCloud compose), fill in the other values
 ```
 
+If TeddyCloud has a login, put it into `TC_AUTH` (single quotes if the password contains `$`). To show teddybridge inside TeddyCloud via the [plugin](#teddycloud-plugin-optional), set `FRAME_ANCESTORS` to the TeddyCloud address in your browser's address bar, e.g. `https://teddycloud.example.com`.
+
 Then copy the `teddybridge` service from [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml) into TeddyCloud's `docker-compose.yml` (variant A), or use it as a separate compose file that joins the TeddyCloud network (variant B), and run:
 
 ```sh
@@ -160,6 +162,10 @@ On first use the plugin asks for the address at which **the browser** reaches te
 **Inside TeddyCloud or in its own window.** teddybridge is shown inside TeddyCloud if `FRAME_ANCESTORS` contains TeddyCloud's address as the browser sees it, e.g. `FRAME_ANCESTORS=http://192.0.2.10` when TeddyCloud is at `http://192.0.2.10` and teddybridge at `http://192.0.2.10:8085`. Otherwise the plugin redirects the whole window to teddybridge (after about 2–3 s).
 
 With login, embedding needs both on the **same site**: the same host name or IP with different ports, or subdomains of the same registered domain (`tc.example.com` / `tb.example.com`). The session cookie is `SameSite=Strict`, so browsers do not send it to a framed teddybridge on another site (e.g. different IPs, or `teddycloud.lan` / `teddybridge.lan`). teddybridge then shows a hint with a link to open it in its own window. Without login this restriction does not apply.
+
+**From the TeddyCloud plugin collection**
+
+The plugin is also part of the community collection [TeddyCloudPlugins](https://github.com/henryk86/TeddyCloudPlugins): download `teddybridge-<version>.zip` from its latest release and unzip it into TeddyCloud's `plugins` folder, so that `plugins/teddybridge/plugin.json` exists. The collection may lag behind this repository by a version.
 
 **TeddyCloud in Docker**
 
