@@ -1,0 +1,11 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.env
+!deploy/*.env.example
+CLAUDE.md
+.claude/
+plugin-local/
+*.bak
+*.bak-*

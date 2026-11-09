@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>teddybridge</title>
+<style>
+:root{--bg:#f6f5f2;--card:#fff;--fg:#1d1d1f;--mut:#6b6b70;--line:#dedcd6;--acc:#d9480f;--ok:#2b8a3e;--err:#c92a2a;--sel:#fff1e6;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#18181a;--card:#232326;--fg:#ececec;--mut:#9a9aa0;--line:#38383c;--acc:#ff8a4c;--ok:#69db7c;--err:#ff8787;--sel:#3a2a20;color-scheme:dark}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;font:15px/1.4 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+header h1{font-size:17px;margin:0 8px 0 0}
+#logout{margin-left:auto}
+select,input,button{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+button{cursor:pointer}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+button:disabled{opacity:.5;cursor:default}
+.tabs button.on{border-color:var(--acc);color:var(--acc);font-weight:600}
+#q{flex:1 1 160px;min-width:0}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line)}
+.bar label{color:var(--mut)}
+#folder{width:min(260px,60vw)}
+#customWrap{display:inline-flex;align-items:center;gap:2px;color:var(--mut)}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--fg);max-width:min(520px,calc(100vw - 32px))}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+dialog ul{padding-left:18px} dialog .btns{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+main{padding:16px}
+.crumb{margin:0 0 12px;color:var(--mut)}
+.crumb a{color:var(--acc);cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px}
+.tile{background:var(--card);border:2px solid transparent;border-radius:12px;overflow:hidden;cursor:pointer;position:relative;display:flex;flex-direction:column}
+.tile.sel{border-color:var(--acc);background:var(--sel)}
+.tile img,.tile .ph{width:100%;aspect-ratio:1;object-fit:cover;background:var(--line);display:block}
+.tile .meta{padding:8px 10px;display:flex;flex-direction:column;gap:2px}
+.tile .t{font-weight:600;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.tile .ep{color:var(--acc);font-weight:700;font-size:13px}
+.tile .s{color:var(--mut);font-size:13px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.badge{position:absolute;top:6px;left:6px;background:var(--ok);color:#fff;font-size:12px;border-radius:6px;padding:2px 6px}
+.badge.warn{background:var(--err);left:auto;right:6px}
+.check{position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.45);color:#fff;display:grid;place-items:center;font-size:14px}
+.tile.sel .check{background:var(--acc)}
+.coll{padding:14px;cursor:pointer}
+.coll .s{color:var(--mut)}
+.more{display:block;margin:18px auto}
+.empty{color:var(--mut);padding:30px 0;text-align:center}
+#queue{position:fixed;right:16px;bottom:16px;width:min(420px,calc(100vw - 32px));max-height:50vh;overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.2);z-index:10}
+#queue .h{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)}
+#queue .job{padding:8px 12px;border-bottom:1px solid var(--line);font-size:14px}
+#queue .job .st{color:var(--mut);font-size:13px}
+#queue .job.done .st{color:var(--ok)} #queue .job.error .st{color:var(--err)}
+.prog{height:4px;background:var(--line);border-radius:2px;margin-top:4px;overflow:hidden}
+.prog div{height:100%;background:var(--acc)}
+#msg{color:var(--err)}
+.tile .tr{align-self:flex-start;margin-top:4px;padding:3px 8px;font-size:13px}
+.songs{list-style:none;margin:0;padding:0;max-width:760px}
+.songs li{display:flex;gap:10px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--line)}
+.songs li .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.songs li .n small{color:var(--mut)}
+.songs li button{padding:3px 9px}
+.songs li.in .add{border-color:var(--ok);color:var(--ok)}
+h3.sub{margin:22px 0 8px;font-size:15px;color:var(--mut)}
+#mix{padding:10px 16px;border-bottom:1px solid var(--line);background:var(--sel)}
+#mix .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+#mix input{flex:1 1 200px;min-width:0}
+#mix ol{margin:8px 0 0;padding-left:22px;max-height:220px;overflow:auto}
+#mix ol li{padding:2px 0} #mix ol li button{padding:0 6px;margin-left:4px;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <h1>teddybridge</h1>
+  <span class="tabs" id="srcTabs" hidden><button data-src="abs" class="on">Audiobookshelf</button> <button data-src="nd">Navidrome</button> <button data-src="fs">Dateien</button></span>
+  <select id="lib" aria-label="Bibliothek"></select>
+  <span class="tabs"><button id="tAll" class="on">Alle</button> <button id="tSer">Serien</button> <button id="tCol">Sammlungen</button></span>
+  <select id="sort" aria-label="Sortierung">
+    <option value="addedAt:1">Zuletzt hinzugefügt</option>
+    <option value="media.metadata.title:0">Titel A–Z</option>
+    <option value="media.metadata.authorName:0">Autor A–Z</option>
+    <option value="media.duration:0" data-abs>Kürzeste zuerst</option>
+    <option value="media.duration:1" data-abs>Längste zuerst</option>
+  </select>
+  <input id="q" type="search" placeholder="Suchen…" aria-label="Suche">
+  <form id="logout" method="post" action="/logout" hidden><button type="submit" title="Abmelden">Abmelden</button></form>
+</header>
+<div class="bar">
+  <label for="mode">Ablage</label>
+  <select id="mode"><option value="auto">Automatisch</option><option value="custom">Eigener Unterordner</option></select>
+  <span id="customWrap" hidden><span class="base" id="baseLbl">…</span>/<input id="folder" spellcheck="false" placeholder="z. B. Weihnachten"></span>
+  <span id="bundleWrap" hidden><label title="Alle ausgewählten Hörbücher nacheinander in eine einzige TAF, in der Reihenfolge der Auswahl"><input type="checkbox" id="bundle"> als eine TAF</label>
+    <input id="bundleName" spellcheck="false" placeholder="Name der TAF" maxlength="120" hidden></span>
+  <button id="send" class="primary" disabled>Nach TeddyCloud (0)</button>
+  <button id="none">Auswahl leeren</button>
+  <span id="msg"></span>
+</div>
+<section id="mix" hidden>
+  <div class="row"><strong>Eigene Playlist</strong> <span id="mixInfo"></span>
+    <input id="mixName" placeholder="Name der Playlist" maxlength="120">
+    <button id="mixSend" class="primary">Als eine TAF nach TeddyCloud</button> <button id="mixClear">Leeren</button> <button id="mixToggle">Liste</button></div>
+  <ol id="mixList" hidden></ol>
+</section>
+<main>
+  <p class="crumb" id="crumb"></p>
+  <div class="grid" id="grid"></div>
+  <ul class="songs" id="songs" hidden></ul>
+  <button class="more" id="more" hidden>Mehr laden</button>
+  <div class="empty" id="empty" hidden>Nichts gefunden.</div>
+</main>
+<dialog id="big">
+  <h3 style="margin-top:0">Mehr als 99 Dateien</h3>
+  <p>TeddyCloud kann pro TAF höchstens 99 Dateien umwandeln. Diese Hörspiele sind grösser:</p>
+  <ul id="bigList"></ul>
+  <p><b>Zusammenfügen:</b> eine TAF mit 99 Kapiteln; die kürzesten aufeinanderfolgenden Dateien werden verbunden (nur MP3).<br>
+  <b>Aufteilen:</b> mehrere TAFs („Teil 1 von n“, gleichmässig).</p>
+  <div class="btns"><button id="bigCancel">Abbrechen</button><button id="bigSkip">Diese weglassen</button><button id="bigSplit">Aufteilen</button><button id="bigMerge" class="primary">Zusammenfügen</button></div>
+</dialog>
+<div id="queue" hidden>
+  <div class="h"><strong>Warteschlange</strong><span><button id="clr">Erledigte entfernen</button> <button id="hide">×</button></span></div>
+  <div id="jobs"></div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const st = {mix:[], src:'abs', lib:null, libs:[], view:'all', page:0, total:0, items:[], sel:new Map(), present:new Set(), coll:null, q:'', max:99};
+const PAGE = 48;
+const ACTIVE = ['downloading','preparing','uploading','encoding'];
+const fmtEta = s => s>=3600 ? `${Math.floor(s/3600)} h ${String(Math.floor(s%3600/60)).padStart(2,'0')} min` : `${Math.max(1,Math.round(s/60))} min`;
+const LABEL = {waiting:'wartend', downloading:'herunterladen', uploading:'hochladen', preparing:'vorbereiten (Kapitel schneiden/zusammenfügen) …', retrying:'TeddyCloud abgebrochen – warte und versuche neu …', encoding:'umwandeln …', done:'fertig', skipped:'übersprungen (schon vorhanden)', error:'Fehler'};
+
+async function api(path, opt){
+  const r = await fetch(path, opt);
+  if(r.status===401){ location.href='/login'; throw new Error('Anmeldung erforderlich'); }
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error || j.detail?.[0]?.msg || j.detail || ('HTTP '+r.status));
+  return j;
+}
+function el(tag, cls, text){const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e;}
+function dur(s){s=Math.round(s||0); const h=Math.floor(s/3600), m=Math.round((s%3600)/60); return h?`${h} h ${m} min`:`${m} min`;}
+function msg(t){$('#msg').textContent=t||'';}
+const B = () => st.src==='nd' ? '/api/nd' : st.src==='fs' ? '/api/fs' : '/api';
+const AUTO = {abs:'Bibliothek/Serie bzw. Autor', nd:'Musikordner/Album-Künstler', fs:'Freigabe/Ordnerpfad'};
+function store(k,v){try{localStorage.setItem(k,v);}catch(e){}}
+function load(k){try{return localStorage.getItem(k);}catch(e){return null;}}
+
+async function init(){
+  try{
+    const cfg = await api('/api/config'); st.max=cfg.maxFiles; st.base=cfg.tcBase;
+    if(cfg.auth) $('#logout').hidden=false;
+    if(cfg.readonly){ st.readonly=true; document.querySelector('header h1').textContent='teddybridge (nur lesen)'; }
+    document.querySelectorAll('.base').forEach(e=>e.textContent=cfg.tcBase);
+    const so=load('sort'); if(so&&[...$('#sort').options].some(o=>o.value===so)) $('#sort').value=so;
+    const srcs=cfg.sources||['abs'];
+    $('#srcTabs').hidden=srcs.length<2;
+    for(const b of document.querySelectorAll('#srcTabs button')) b.hidden=!srcs.includes(b.dataset.src);
+    const saved=load('src');
+    await selectSrc(srcs.includes(saved)?saved:'abs');
+  }catch(e){msg(e.message);}
+  refreshPresent(); poll();
+}
+async function selectSrc(src){
+  st.src=src; store('src',src); msg('');
+  for(const b of document.querySelectorAll('#srcTabs button')) b.classList.toggle('on',b.dataset.src===src);
+  const nd=src==='nd', fs=src==='fs';
+  $('#tSer').textContent=nd?'Künstler':'Serien'; $('#tCol').textContent=nd?'Playlists':'Sammlungen';
+  $('#tAll').textContent=fs?'Ordner':'Alle'; $('#tSer').hidden=fs; $('#tCol').hidden=fs; $('#sort').hidden=fs; st.path='-';
+  renderMix();
+  for(const o of $('#sort').options) if(o.hasAttribute('data-abs')) o.hidden=nd;
+  if(nd&&$('#sort').selectedOptions[0]?.hidden) $('#sort').value='media.metadata.title:0';
+  $('#mode').options[0].textContent=`Automatisch: ${st.base}/${AUTO[src]}`;
+  $('#lib').replaceChildren(); st.items=[]; $('#grid').replaceChildren();
+  try{
+    st.libs = await api(`${B()}/libraries`);
+    for(const l of st.libs){const o=el('option',null,l.name); o.value=l.id; $('#lib').append(o);}
+    const saved=load('lib_'+src)||(src==='abs'?load('lib'):null);
+    if(st.libs.some(l=>l.id===saved)) $('#lib').value=saved;
+    if(st.libs.length) selectLib($('#lib').value);
+    else msg(nd?'Kein Musikordner gefunden.':fs?'Keine Freigabe konfiguriert.':'Keine Hörbuch-Bibliothek gefunden.');
+  }catch(e){msg(e.message);}
+}
+function selectLib(id){
+  st.lib=id; store('lib_'+st.src,id);
+  st.sel.clear(); $('#q').value=''; st.q=''; st.path='-';
+  showAll();
+}
+function libObj(){return st.libs.find(l=>l.id===st.lib);}
+
+function tab(v){st.view=v; $('#tAll').classList.toggle('on',v==='all'||v==='search'); $('#tSer').classList.toggle('on',v==='sers'||v==='ser'); $('#tCol').classList.toggle('on',v==='cols'||v==='coll');}
+
+async function showAll(){
+  tab('all'); st.coll=null; st.page=0; st.items=[]; $('#crumb').textContent='';
+  if(st.src==='fs') return browse(st.path||'-');
+  await loadPage();
+}
+async function browse(path){
+  st.path=path; tab('all'); $('#songs').hidden=true;
+  try{
+    const d=await api(`/api/fs/libraries/${st.lib}/browse?path=${encodeURIComponent(path)}`);
+    const c=$('#crumb'); c.replaceChildren();
+    d.crumbs.forEach((x,i)=>{
+      if(i) c.append(' › ');
+      if(i<d.crumbs.length-1){ const a=el('a',null,x.name); a.onclick=()=>browse(x.id); c.append(a); } else c.append(x.name);
+    });
+    st.items=(d.here.item?[d.here]:[]).concat(d.entries); st.total=st.items.length; render();
+    if(!st.items.length){ $('#empty').hidden=false; $('#empty').textContent='Keine Unterordner und keine Audiodateien.'; }
+  }catch(e){msg(e.message);}
+}
+async function loadPage(){
+  try{
+    const [sort,desc]=$('#sort').value.split(':');
+    const url = st.view==='ser' ? `${B()}/libraries/${st.lib}/series/${st.ser}/items?page=${st.page}&limit=${PAGE}`
+      : `${B()}/libraries/${st.lib}/items?page=${st.page}&limit=${PAGE}&sort=${encodeURIComponent(sort)}&desc=${desc==='1'}`;
+    const d = await api(url);
+    st.total=d.total; st.items.push(...d.items); render();
+  }catch(e){msg(e.message);}
+}
+async function search(q){
+  $('#songs').hidden=true;
+  st.q=q; if(!q){return st.src==='fs'?browse(st.path||'-'):st.view==='coll'?openColl(st.coll):st.view==='ser'?openSeries(st.ser,st.serName):showAll();}
+  tab('search'); $('#crumb').textContent=`Suche: „${q}“`+(st.src==='fs'?' (Ordnernamen)':'');
+  try{ const d=await api(`${B()}/libraries/${st.lib}/search?q=${encodeURIComponent(q)}`); st.items=d.items; st.total=d.items.length; render();
+       if(d.songs&&d.songs.length){ $('#empty').hidden=true; renderSongs(d.songs, 'Titel'); } }
+  catch(e){msg(e.message);}
+}
+async function showSeries(){
+  tab('sers'); st.coll=null; $('#crumb').textContent='';
+  const g=$('#grid'); g.replaceChildren(); $('#more').hidden=true;
+  try{
+    const sers=await api(`${B()}/libraries/${st.lib}/series`);
+    $('#empty').hidden=sers.length>0;
+    for(const s of sers){
+      const t=el('div','tile');
+      const cov=s.cover||(s.coverId?`/api/cover/${s.coverId}`:null);
+      if(cov){const img=el('img'); img.loading='lazy'; img.alt=''; img.src=cov; img.onerror=()=>img.replaceWith(el('div','ph')); t.append(img);} else t.append(el('div','ph'));
+      const m=el('div','meta'); m.append(el('div','t',s.name), el('div','s',`${s.count} ${st.src==='nd'?'Alben':'Folgen'}`)); t.append(m);
+      t.onclick=()=>openSeries(s.id,s.name); g.append(t);
+    }
+  }catch(e){msg(e.message);}
+}
+async function openSeries(id,name){
+  tab('ser'); st.ser=id; st.serName=name; st.page=0; st.items=[];
+  const c=$('#crumb'); c.replaceChildren(); const a=el('a',null,st.src==='nd'?'Künstler':'Serien'); a.onclick=showSeries; c.append(a,' › '+name);
+  await loadPage();
+}
+async function showCols(){
+  tab('cols'); st.coll=null; $('#crumb').textContent='';
+  const g=$('#grid'); g.replaceChildren(); $('#more').hidden=true; $('#songs').hidden=true;
+  if(st.src==='nd'){
+    try{ st.items=await api('/api/nd/playlists'); st.total=st.items.length; render();
+         if(!st.items.length){ $('#empty').hidden=false; $('#empty').textContent='Keine Playlists in Navidrome. Eigene Playlist: Titel über „Titel“ bei einem Album oder über die Suche hinzufügen.'; } }
+    catch(e){msg(e.message);}
+    return;
+  }
+  try{
+    const cols=await api(`/api/libraries/${st.lib}/collections`);
+    $('#empty').hidden=cols.length>0;
+    for(const c of cols){
+      const t=el('div','tile coll'); t.append(el('div','t',c.name), el('div','s',`${c.count} Hörspiele`));
+      t.onclick=()=>openColl(c.id); g.append(t);
+    }
+  }catch(e){msg(e.message);}
+}
+async function openColl(id){
+  tab('coll'); st.coll=id;
+  try{
+    const d=await api(`/api/libraries/${st.lib}/collections/${id}`);
+    const c=$('#crumb'); c.replaceChildren(); const a=el('a',null,'Sammlungen'); a.onclick=showCols; c.append(a, ' › '+d.name);
+    st.items=d.items; st.total=d.items.length; render();
+  }catch(e){msg(e.message);}
+}
+
+function render(){
+  const g=$('#grid'); g.replaceChildren(); $('#songs').hidden=true;
+  $('#empty').hidden=st.items.length>0; $('#empty').textContent='Nichts gefunden.';
+  for(const it of st.items){
+    if(it.source==='fs'&&!it.item){  // reiner Ordner: hineinnavigieren
+      const t=el('div','tile coll'); t.append(el('div','t','📁 '+it.title), el('div','s',`${it.dirs} Unterordner`));
+      t.onclick=()=>{ $('#q').value=''; st.q=''; browse(it.id); }; g.append(t); continue;
+    }
+    const t=el('div','tile'); t.dataset.id=it.id; t.dataset.mark=it.mark||it.id.slice(0,8);
+    const cov=it.cover||(it.hasCover?`/api/cover/${it.id}`:null);
+    if(cov){const img=el('img'); img.loading='lazy'; img.alt=''; img.src=cov; img.onerror=()=>img.replaceWith(el('div','ph')); t.append(img);}
+    else t.append(el('div','ph'));
+    const m=el('div','meta');
+    if(it.seq) m.append(el('div','ep','Folge '+(/^\d+$/.test(it.seq)?String(parseInt(it.seq,10)):it.seq)));
+    m.append(el('div','t',it.title));
+    const sub=[it.series,it.author].filter(Boolean).join(' · '); if(sub) m.append(el('div','s',sub));
+    m.append(el('div','s',[it.duration?dur(it.duration):'', it.files!=null?`${it.files} Dateien`:''].filter(Boolean).join(' · ')));
+    if(it.source==='fs'&&it.dirs&&it.id!==st.path){
+      const b=el('button','tr','Ordner ▸'); b.title='Unterordner anzeigen';
+      b.onclick=e=>{e.stopPropagation(); $('#q').value=''; st.q=''; browse(it.id);}; m.append(b);
+    }
+    if(st.src==='nd'&&it.kind!=='playlist'){
+      const b=el('button','tr','Titel ▸'); b.title='Einzelne Titel für eine eigene Playlist';
+      b.onclick=e=>{e.stopPropagation(); openAlbumSongs(it);}; m.append(b);
+    }
+    t.append(m, el('div','check','✓'));
+    if(it.files>st.max) t.append(el('span','badge warn',`${it.files} Dateien`));
+    t.onclick=()=>toggle(it);
+    g.append(t);
+  }
+  $('#more').hidden=!((st.view==='all'||st.view==='ser') && st.items.length<st.total);
+  markTiles();
+}
+function markTiles(){
+  for(const t of document.querySelectorAll('.tile[data-id]')){
+    const id=t.dataset.id; t.classList.toggle('sel',st.sel.has(id));
+    let b=t.querySelector('.badge:not(.warn)');
+    if(st.present.has(t.dataset.mark)){ if(!b){b=el('span','badge','in TeddyCloud'); t.append(b);} }
+    else if(b) b.remove();
+  }
+  const n=st.sel.size; $('#send').textContent=`Nach TeddyCloud (${n})`; $('#send').disabled=!n||st.readonly;
+  $('#bundleWrap').hidden=n<2; const bundle=n>=2&&$('#bundle').checked; $('#bundleName').hidden=!bundle;
+  if(bundle) $('#send').textContent=`Als eine TAF (${n})`;
+  const order=[...st.sel.keys()];  // Reihenfolge der Sammel-TAF = Reihenfolge der Auswahl
+  for(const t of document.querySelectorAll('.tile[data-id]')){
+    const c=t.querySelector('.check'); if(!c) continue;
+    const i=order.indexOf(t.dataset.id); c.textContent=bundle&&i>=0?String(i+1):'✓';
+  }
+}
+async function openAlbumSongs(it){
+  const back={view:st.view, items:st.items, total:st.total, crumb:[...$('#crumb').childNodes].map(n=>n.cloneNode(true))};
+  try{
+    const d=await api(`/api/nd/albums/${it.id}/songs`);
+    $('#grid').replaceChildren(); $('#more').hidden=true; $('#empty').hidden=true;
+    const c=$('#crumb'); c.replaceChildren(); const a=el('a',null,'‹ zurück');
+    a.onclick=()=>{ st.view=back.view; st.items=back.items; st.total=back.total; render(); $('#crumb').replaceChildren(...back.crumb); };
+    c.append(a, ` · ${d.name} – `);
+    const all=el('a',null,'alle hinzufügen'); all.onclick=()=>{ for(const s of d.songs) addMix(s); renderSongs(d.songs); }; c.append(all);
+    renderSongs(d.songs);
+  }catch(e){msg(e.message);}
+}
+function renderSongs(songs, heading){
+  const ul=$('#songs'); ul.replaceChildren(); ul.hidden=false;
+  if(heading){ const h=el('h3','sub',heading); ul.append(h); }
+  for(const s of songs){
+    const li=el('li'); const inMix=st.mix.some(x=>x.id===s.id); li.classList.toggle('in',inMix);
+    const n=el('div','n'); n.append(el('span',null,s.title+' '), el('small',null,`${s.artist} · ${s.album} · ${dur(s.duration)}`));
+    const b=el('button','add',inMix?'✓':'+'); b.title='Zur eigenen Playlist';
+    b.onclick=()=>{ inMix&&st.mix.some(x=>x.id===s.id)?removeMix(s.id):addMix(s); renderSongs(songs, heading); };
+    li.append(n,b); ul.append(li);
+  }
+}
+function addMix(s){ if(!st.mix.some(x=>x.id===s.id)) st.mix.push(s); renderMix(); }
+function removeMix(id){ st.mix=st.mix.filter(x=>x.id!==id); renderMix(); }
+function renderMix(){
+  $('#mix').hidden=!(st.src==='nd'&&st.mix.length);
+  const total=st.mix.reduce((a,s)=>a+(s.duration||0),0);
+  $('#mixInfo').textContent=`${st.mix.length} Titel · ${dur(total)}${st.mix.length>st.max?` · mehr als ${st.max}: wird aufgeteilt`:''}`;
+  const ol=$('#mixList'); ol.replaceChildren();
+  st.mix.forEach((s,i)=>{
+    const li=el('li',null,`${s.title} – ${s.artist}`);
+    const up=el('button',null,'↑'), dn=el('button',null,'↓'), x=el('button',null,'×');
+    up.disabled=i===0; dn.disabled=i===st.mix.length-1;
+    up.onclick=()=>{ [st.mix[i-1],st.mix[i]]=[st.mix[i],st.mix[i-1]]; renderMix(); };
+    dn.onclick=()=>{ [st.mix[i+1],st.mix[i]]=[st.mix[i],st.mix[i+1]]; renderMix(); };
+    x.onclick=()=>removeMix(s.id);
+    li.append(up,dn,x); ol.append(li);
+  });
+  $('#mixSend').disabled=!st.mix.length||st.readonly;
+}
+async function sendMix(){
+  const name=$('#mixName').value.trim();
+  if(!name){ msg('Bitte einen Namen für die Playlist angeben.'); $('#mixName').focus(); return; }
+  const custom=$('#mode').value==='custom'; const subfolder=custom?$('#folder').value.trim():null;
+  if(custom&&!subfolder){ msg('Bitte Unterordner angeben.'); $('#folder').focus(); return; }
+  $('#mixSend').disabled=true; msg('');
+  try{
+    await api('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subfolder,
+      items:[{id:'custom',title:name,source:'nd',kind:'songs',songs:st.mix.map(s=>s.id),split:st.mix.length>st.max}]})});
+    st.mix=[]; $('#mixName').value=''; renderMix(); if(!$('#songs').hidden) $('#songs').querySelectorAll('li.in').forEach(li=>{li.classList.remove('in'); li.querySelector('.add').textContent='+';});
+    $('#queue').dataset.closed='0'; $('#queue').hidden=false; poll();
+  }catch(e){ msg(e.message); renderMix(); }
+}
+function toggle(it){ st.sel.has(it.id)?st.sel.delete(it.id):st.sel.set(it.id,{...it,source:st.src,lib:st.lib}); markTiles(); }
+
+async function refreshPresent(){
+  try{ const d=await api('/api/present'); st.present=new Set(d.ids); }
+  catch(e){ msg(e.message); }
+  markTiles();
+}
+
+function askBig(big){
+  return new Promise(res=>{
+    const ul=$('#bigList'); ul.replaceChildren();
+    for(const it of big){ const parts=Math.ceil(it.files/st.max); ul.append(el('li',null,`${it.title} – ${it.files} Dateien → 1 TAF mit ${st.max} Kapiteln oder ${parts} Teile`)); }
+    const d=$('#big'); const done=v=>{d.close(); res(v);};
+    $('#bigSplit').onclick=()=>done('split'); $('#bigMerge').onclick=()=>done('merge'); $('#bigSkip').onclick=()=>done('skip'); $('#bigCancel').onclick=()=>done(null);
+    d.oncancel=()=>res(null);
+    d.showModal();
+  });
+}
+
+async function send(){
+  if(!st.sel.size) return;
+  const custom=$('#mode').value==='custom';
+  const subfolder=custom?$('#folder').value.trim():null;
+  if(custom&&!subfolder){ msg('Bitte Unterordner angeben.'); $('#folder').focus(); return; }
+  let items=[...st.sel.values()].map(it=>({id:it.id,title:it.title,files:it.files,source:it.source||'abs',lib:it.lib,kind:it.kind||'album'}));
+  const bundle=items.length>=2&&$('#bundle').checked?$('#bundleName').value.trim():null;
+  if(items.length>=2&&$('#bundle').checked&&!bundle){ msg('Bitte einen Namen für die TAF angeben.'); $('#bundleName').focus(); return; }
+  const big=bundle?[]:items.filter(it=>it.files>st.max);  // Sammel-TAF: über 99 Kapitel wird automatisch zusammengefügt
+  let split=false, merge=false;
+  if(big.length){
+    const choice=await askBig(big);
+    if(!choice) return;
+    if(choice==='skip') items=items.filter(it=>!(it.files>st.max)); else if(choice==='merge') merge=true; else split=true;
+    if(!items.length){ msg('Nichts zu übertragen.'); return; }
+  }
+  items=items.map(it=>({id:it.id,title:it.title,source:it.source,kind:it.kind,lib:(it.source==='nd'||it.source==='fs')?String(it.lib):null,split:split&&it.files>st.max,merge:merge&&it.files>st.max}));
+  $('#send').disabled=true; msg('');
+  try{ await api('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subfolder,items,bundle})});
+       $('#bundle').checked=false; $('#bundleName').value=''; st.sel.clear(); markTiles(); $('#queue').dataset.closed='0'; $('#queue').hidden=false; poll(); }
+  catch(e){ msg(e.message); markTiles(); }
+}
+
+let pollTimer, lastActive=false;
+async function poll(){
+  clearTimeout(pollTimer);
+  let active=false;
+  try{
+    const jobs=await api('/api/jobs');
+    const box=$('#jobs'); box.replaceChildren();
+    for(const j of jobs.slice().reverse()){
+      const d=el('div','job '+j.state);
+      d.append(el('div',null,j.title));
+      let s=LABEL[j.state]||j.state;
+      if((j.state==='downloading'||j.state==='uploading')&&j.m) s+=` ${j.n}/${j.m}`;
+      if(j.state==='error'&&j.error) s+=': '+j.error;
+      if(j.state==='encoding'&&j.parts>1) s+=` Teil ${j.part}/${j.parts}`;
+      if(j.state==='encoding'&&j.pct!=null) s+=` ${j.pct} %`;
+      if(ACTIVE.includes(j.state)&&j.eta>0){
+        const at=new Date(Date.now()+j.eta*1000).toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit'});
+        s+=` · noch ca. ${fmtEta(j.eta)} (fertig ~${at})`;
+      }
+      if(j.folder) s+=' · '+j.folder;
+      if(j.state==='done'&&j.taf) s+=' / '+j.taf;
+      if(j.note) s+=' · '+j.note;
+      if(j.check) s+=` · ${j.check} ${j.warning?'⚠':'✓'}`;
+      if(j.warning) s+=' – Achtung: '+j.warning;
+      d.append(el('div','st',s));
+      if(ACTIVE.includes(j.state)&&j.m){  // ein Balken je Phase: erst Übertragen, dann Umwandeln
+        const p=el('div','prog'), b=el('div');
+        const frac=j.pct!=null?j.pct/100:(j.state==='encoding'?0:(j.n-1)/j.m);
+        b.style.width=Math.round(frac*100)+'%'; p.append(b); d.append(p);
+      }
+      box.append(d);
+    }
+    active=jobs.some(j=>!['done','skipped','error'].includes(j.state));
+    if(jobs.length && $('#queue').dataset.closed!=='1') $('#queue').hidden=false;
+    if(lastActive && !active) refreshPresent();
+    lastActive=active;
+  }catch(e){}
+  pollTimer=setTimeout(poll, active?1500:8000);
+}
+
+$('#lib').onchange=e=>selectLib(e.target.value);
+for(const b of document.querySelectorAll('#srcTabs button')) b.onclick=()=>{ if(b.dataset.src!==st.src) selectSrc(b.dataset.src); };
+$('#tAll').onclick=()=>{$('#q').value='';st.q='';st.path='-';showAll();};
+$('#tSer').onclick=()=>{$('#q').value='';st.q='';showSeries();};
+$('#tCol').onclick=()=>{$('#q').value='';st.q='';showCols();};
+$('#sort').onchange=e=>{store('sort',e.target.value); $('#q').value=''; st.q=''; showAll();};
+$('#more').onclick=()=>{st.page++; loadPage();};
+let qTimer; $('#q').oninput=e=>{clearTimeout(qTimer); qTimer=setTimeout(()=>search(e.target.value.trim()),350);};
+$('#bundle').onchange=()=>{markTiles(); if($('#bundle').checked) $('#bundleName').focus();};
+$('#mode').onchange=e=>{$('#customWrap').hidden=e.target.value!=='custom'; if(!$('#customWrap').hidden) $('#folder').focus();};
+$('#send').onclick=send;
+$('#mixSend').onclick=sendMix;
+$('#mixClear').onclick=()=>{ st.mix=[]; renderMix(); };
+$('#mixToggle').onclick=()=>{ $('#mixList').hidden=!$('#mixList').hidden; };
+$('#none').onclick=()=>{st.sel.clear(); markTiles();};
+$('#clr').onclick=async()=>{await api('/api/jobs/clear',{method:'POST'}); poll();};
+$('#hide').onclick=()=>{$('#queue').hidden=true; $('#queue').dataset.closed='1';};
+init();
+</script>
+</body>
+</html>

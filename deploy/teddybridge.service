@@ -1,0 +1,32 @@
+[Unit]
+Description=teddybridge – Hörspiele und Musik aus Audiobookshelf/Navidrome nach TeddyCloud
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=teddybridge
+Group=teddybridge
+WorkingDirectory=/opt/teddybridge
+EnvironmentFile=/etc/teddybridge/teddybridge.env
+Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ExecStart=/opt/teddybridge/venv/bin/python -m app
+Restart=on-failure
+RestartSec=5
+
+# Härtung
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

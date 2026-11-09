@@ -1,0 +1,42 @@
+# teddybridge als Begleitcontainer neben TeddyCloud.
+#
+# Variante A (empfohlen): den Dienst "teddybridge" unten in die bestehende docker-compose.yml von TeddyCloud
+# übernehmen. Dann liegen beide im selben Netz, und teddybridge erreicht TeddyCloud direkt unter seinem
+# Dienstnamen (TC_URL=http://teddycloud, ohne Reverse Proxy dazwischen).
+#
+# Variante B: eigene Compose-Datei und dem Netz von TeddyCloud beitreten (Abschnitt "networks" unten
+# einkommentieren; Netzname mit `docker network ls` nachsehen, meist <ordner>_default).
+#
+# Konfiguration: teddybridge.env neben dieser Datei (Vorlage: deploy/teddybridge.env.example), Rechte 600.
+# Im Container gilt mindestens:  TC_URL=http://teddycloud   (Dienstname von TeddyCloud, Port 80 intern)
+
+services:
+  teddybridge:
+    image: ghcr.io/urza-lab/teddybridge:latest
+    # build: ./teddybridge          # stattdessen selbst bauen (Ordner mit dem geklonten Repo)
+    container_name: teddybridge
+    restart: unless-stopped
+    env_file: ./teddybridge.env
+    ports:
+      - "8085:8085"                 # nur nötig, wenn Caddy/der Browser nicht im selben Docker-Netz ist
+    volumes:
+      - teddybridge-tmp:/var/tmp    # Arbeitsordner (Downloads), auf Platte statt im RAM
+      # optional Dateiquelle (NAS), immer nur lesend; in der env-Datei dann FS_ROOTS=Hörspiele=/nas/hoerspiele
+      # - /mnt/nas/hoerspiele:/nas/hoerspiele:ro
+    read_only: true                 # Image-Dateisystem schreibgeschützt
+    tmpfs:
+      - /tmp:size=64m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # depends_on: [teddycloud]      # in Variante A sinnvoll
+
+# Variante B:
+#    networks: [teddycloud]
+#networks:
+#  teddycloud:
+#    external: true
+#    name: teddycloud_default
+
+volumes:
+  teddybridge-tmp:

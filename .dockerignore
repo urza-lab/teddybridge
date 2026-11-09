@@ -1,0 +1,16 @@
+.git
+.gitignore
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.env
+CLAUDE.md
+.claude/
+plugin-local/
+plugin/
+tests/
+mock/
+deploy/
+README.md
+LICENSE
