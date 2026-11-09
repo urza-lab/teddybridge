@@ -14,6 +14,9 @@ header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px so
 header h1{font-size:17px;margin:0 8px 0 0}
 #langSel{margin-left:auto} #logout{margin-left:0}
 #langSel[hidden]+#logout{margin-left:auto}
+#settingsLink{margin-left:auto;display:inline-block;text-decoration:none;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+#settingsLink[hidden]{display:none}
+#settingsLink:not([hidden])~#langSel,#settingsLink:not([hidden])~#logout{margin-left:0}
 select,input,button{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
 button{cursor:pointer}
 button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
@@ -83,6 +86,7 @@ h3.sub{margin:22px 0 8px;font-size:15px;color:var(--mut)}
     <option value="media.duration:1" data-abs>Längste zuerst</option>
   </select>
   <input id="q" type="search" placeholder="Suchen…" aria-label="Suche">
+  <a id="settingsLink" href="/settings" title="Einstellungen" hidden>Einstellungen</a>
   <select id="langSel" aria-label="Sprache" title="Sprache" hidden><option value="de">Deutsch</option><option value="en">English</option></select>
   <form id="logout" method="post" action="/logout" hidden><button type="submit" title="Abmelden">Abmelden</button></form>
 </header>
@@ -132,7 +136,7 @@ const EN = {
   'Sprache':'Language', 'Nach TeddyCloud (0)':'To TeddyCloud (0)', 'Dateien':'Files', 'Bibliothek':'Library', 'Alle':'All', 'Serien':'Series', 'Sammlungen':'Collections',
   'Sortierung':'Sort order', 'Zuletzt hinzugefügt':'Recently added', 'Titel A–Z':'Title A–Z', 'Autor A–Z':'Author A–Z',
   'Kürzeste zuerst':'Shortest first', 'Längste zuerst':'Longest first', 'Suchen…':'Search…', 'Suche':'Search',
-  'Abmelden':'Log out', 'Ablage':'Destination', 'Automatisch':'Automatic', 'Eigener Unterordner':'Custom subfolder',
+  'Abmelden':'Log out', 'Einstellungen':'Settings', 'Ablage':'Destination', 'Automatisch':'Automatic', 'Eigener Unterordner':'Custom subfolder',
   'z. B. Weihnachten':'e.g. Christmas',
   'Alle ausgewählten Hörbücher nacheinander in eine einzige TAF, in der Reihenfolge der Auswahl':'All selected audiobooks one after another in a single TAF, in the order of selection',
   'als eine TAF':'as one TAF', 'Name der TAF':'Name of the TAF', 'Auswahl leeren':'Clear selection',
@@ -207,6 +211,7 @@ async function init(){
   try{
     const cfg = await api('/api/config'); st.max=cfg.maxFiles; st.base=cfg.tcBase;
     if(cfg.auth) $('#logout').hidden=false;
+    if(cfg.settings) $('#settingsLink').hidden=false;
     if(cfg.readonly){ st.readonly=true; document.querySelector('header h1').textContent=T('teddybridge (nur lesen)'); }
     document.querySelectorAll('.base').forEach(e=>e.textContent=cfg.tcBase);
     const so=load('sort'); if(so&&[...$('#sort').options].some(o=>o.value===so)) $('#sort').value=so;

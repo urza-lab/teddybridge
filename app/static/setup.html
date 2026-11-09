@@ -33,15 +33,18 @@ button:disabled{opacity:.5;cursor:default}
 details summary{cursor:pointer;font-weight:600}
 code{font-size:13px}
 .banner{border-color:var(--err)}
+a{color:var(--acc)}
 [hidden]{display:none!important}
 </style>
 </head>
 <body>
 <main>
-  <h1>teddybridge einrichten</h1>
+  <h1 id="title">teddybridge einrichten</h1>
+  <p id="back" hidden><a href="/">← zurück zu teddybridge</a></p>
 
   <form class="card" id="unlock">
     <p>Zum Schutz brauchst du den Einmal-Code aus dem Log von teddybridge, z. B. mit <code>docker logs teddybridge</code>.</p>
+    <div class="actions" id="codeReq" hidden><button type="button" id="reqCode">Code ins Log schreiben</button><span class="hint" id="reqDone" hidden>Code steht jetzt im Log (10 min gültig).</span></div>
     <label>Einmal-Code<input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCD-EFGH-JKLM" required autofocus></label>
     <p class="err" id="codeErr" hidden></p>
     <div class="actions"><button class="primary" type="submit">Weiter</button></div>
@@ -117,6 +120,8 @@ code{font-size:13px}
     </details>
 
     <div class="card">
+      <label id="curPassBox" hidden>Aktuelles Passwort von teddybridge (zur Bestätigung)<input id="currentPass" type="password" autocomplete="current-password"></label>
+      <p class="hint" id="restartHint" hidden>Speichern startet teddybridge neu; danach meldest du dich neu an.</p>
       <p class="err" id="saveErr" hidden></p>
       <p class="res ok" id="saveOk" hidden></p>
       <div class="actions"><button class="primary" type="submit" id="save">Speichern und starten</button><span class="hint" id="where"></span></div>
@@ -157,6 +162,11 @@ const EN = {
   'teddybridge läuft – weiter zur Anmeldung …':'teddybridge is running – continuing to the login …',
   'Neustart dauert ungewöhnlich lange. Bitte die Seite neu laden oder das Log prüfen.':'The restart takes unusually long. Please reload the page or check the log.',
   'Fehler':'Error','Verbindungsfehler':'Connection error',
+  'Einstellungen':'Settings','← zurück zu teddybridge':'← back to teddybridge',
+  'Code ins Log schreiben':'Write code to the log','Code steht jetzt im Log (10 min gültig).':'The code is now in the log (valid for 10 min).',
+  'Aktuelles Passwort von teddybridge (zur Bestätigung)':'Current teddybridge password (to confirm)',
+  'Speichern startet teddybridge neu; danach meldest du dich neu an.':'Saving restarts teddybridge; you log in again afterwards.',
+  'Speichern und neu starten':'Save and restart',
 };
 const de = document.documentElement.lang !== 'en';
 const T = (s, v) => { let o = de ? s : (EN[s] || s); for (const k in (v || {})) o = o.replaceAll('{' + k + '}', v[k]); return o; };
@@ -167,6 +177,18 @@ if (!de) {
   document.title = 'teddybridge – Setup';
 }
 const $ = id => document.getElementById(id);
+const MODE = document.documentElement.dataset.mode || 'setup';
+const API = document.documentElement.dataset.api || '/api/setup';
+const AUTH = document.documentElement.dataset.auth === '1';
+let BOOT = null;
+if (MODE === 'settings') {
+  $('title').textContent = T('Einstellungen'); document.title = 'teddybridge – ' + T('Einstellungen');
+  $('back').hidden = false; $('codeReq').hidden = false;
+  $('save').textContent = T('Speichern und neu starten');
+  $('restartHint').hidden = false;
+  if (AUTH) $('curPassBox').hidden = false;
+  $('reqCode').onclick = async () => { await api(API + '/code', {}); $('reqDone').hidden = false; $('code').focus(); };
+}
 const FIELDS = ['TC_URL','tcUser','tcPass','ABS_URL','ABS_TOKEN','ND_URL','ND_USER','ND_PASS','FS_ROOTS',
                 'UI_USER','uiPass','uiPass2','UI_LANG','TC_BASE','FRAME_ANCESTORS','TRUSTED_PROXIES','DISCORD_WEBHOOK'];
 const KEYFIELDS = {TC_AUTH:['tcUser','tcPass'], UI_PASS_HASH:['uiPass','uiPass2']};
@@ -191,8 +213,9 @@ function toggle() {
 for (const id of ['useAbs','useNd','useFs','noLogin']) $(id).addEventListener('change', toggle);
 
 async function showWizard() {
-  const {ok, d} = await api('/api/setup/state');
+  const {ok, d} = await api(API + '/state');
   if (!ok) return;
+  BOOT = d.boot || null;
   $('unlock').hidden = true; $('wizard').hidden = false;
   for (const [k, val] of Object.entries(d.values)) if ($(k)) $(k).value = val || '';
   $('tcUser').value = d.tcUser || '';
@@ -214,7 +237,7 @@ async function showWizard() {
 
 $('unlock').onsubmit = async ev => {
   ev.preventDefault();
-  const {ok, d} = await api('/api/setup/unlock', {code: $('code').value});
+  const {ok, d} = await api(API + '/unlock', {code: $('code').value});
   $('codeErr').hidden = ok; $('codeErr').textContent = d.error || T('Fehler');
   if (ok) showWizard();
 };
@@ -223,7 +246,7 @@ for (const b of document.querySelectorAll('[data-test]')) b.onclick = async () =
   const kind = b.dataset.test, out = $('res-' + kind);
   out.className = 'res'; out.textContent = T('teste …'); b.disabled = true;
   try {
-    const {d} = await api('/api/setup/test', {kind, values: collect()});
+    const {d} = await api(API + '/test', {kind, values: collect()});
     out.className = 'res ' + (d.ok ? 'ok' : 'bad'); out.textContent = (d.ok ? '✓ ' : '✗ ') + (d.message || d.error || T('Fehler'));
   } catch (e) { out.className = 'res bad'; out.textContent = '✗ ' + T('Verbindungsfehler'); }
   b.disabled = false;
@@ -236,15 +259,24 @@ $('wizard').onsubmit = async ev => {
     $('saveErr').hidden = false; $('saveErr').textContent = T('Bitte mindestens eine Quelle wählen.'); return;
   }
   $('save').disabled = true;
-  const {ok, d} = await api('/api/setup/save', collect());
+  const body = collect(); if (MODE === 'settings' && AUTH) body.currentPass = $('currentPass').value;
+  const {ok, d} = await api(API + '/save', body);
   if (!ok) { $('saveErr').hidden = false; $('saveErr').textContent = d.error || T('Fehler'); $('save').disabled = false; return; }
   $('saveOk').hidden = false; $('saveOk').textContent = T('Gespeichert. teddybridge startet neu …');
   const t0 = Date.now();
   const poll = async () => {
     try {
-      const r = await fetch('/api/setup/ping', {cache: 'no-store'});
-      let setup = false; try { setup = (await r.json()).setup === true; } catch (e) { /* normale Oberfläche */ }
-      if (!setup) { $('saveOk').textContent = T('teddybridge läuft – weiter zur Anmeldung …'); setTimeout(() => location.href = '/', 800); return; }
+      let done;
+      if (MODE === 'settings') {
+        const r = await fetch('/api/settings/ping', {cache: 'no-store', credentials: 'same-origin'});
+        let boot = null; try { boot = (await r.json()).boot; } catch (e) { /* neu gestartet */ }
+        done = r.status === 401 || (r.ok && boot && boot !== BOOT);
+      } else {
+        const r = await fetch('/api/setup/ping', {cache: 'no-store'});
+        let setup = false; try { setup = (await r.json()).setup === true; } catch (e) { /* normale Oberfläche */ }
+        done = !setup;
+      }
+      if (done) { $('saveOk').textContent = T('teddybridge läuft – weiter zur Anmeldung …'); setTimeout(() => location.href = '/', 800); return; }
     } catch (e) { /* startet gerade neu */ }
     if (Date.now() - t0 > 60000) { $('saveOk').textContent = T('Neustart dauert ungewöhnlich lange. Bitte die Seite neu laden oder das Log prüfen.'); return; }
     setTimeout(poll, 1000);

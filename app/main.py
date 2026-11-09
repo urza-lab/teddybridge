@@ -8,6 +8,7 @@ import logging
 import re
 import secrets
 import os
+import threading
 import time
 import urllib.parse
 
@@ -15,11 +16,11 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from . import __version__, config, i18n, pwhash
+from . import __version__, config, i18n, pwhash, setupcore
 from .i18n import t
 from .clients import Abs, ApiError, Nd, Tc, check_id
 from .fs import Fs
-from .worker import MAX_FILES, Queue, clean_folder, id8, markers, scan_tree, series_list, series_seq
+from .worker import FINAL, MAX_FILES, Queue, clean_folder, id8, markers, scan_tree, series_list, series_seq
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)  # loggt sonst volle URLs
@@ -288,7 +289,127 @@ def index(request: Request):
 def get_config():
     return {"tcBase": CFG.tc_base, "maxFiles": MAX_FILES, "discord": bool(CFG.discord_webhook), "readonly": READONLY, "auth": CFG.ui_auth,
             "lang": i18n.get(), "langFixed": bool(CFG.ui_lang), "version": __version__,
+            "settings": bool(os.environ.get("TB_CONFIG_FILE")),
             "sources": (["abs"] if ABS else []) + (["nd"] if ND else []) + (["fs"] if FS else [])}
+
+
+# ---------- Einstellungen ändern (seit 1.2; gleiche Logik wie die Einrichtung, app/setupcore.py)
+# Mit Login: nur angemeldet, Speichern zusätzlich mit dem aktuellen Passwort. Ohne Login: Einmal-Code aus dem Log
+# (auf Knopfdruck erzeugt, 10 min gültig). Speichern startet teddybridge neu, darum nicht während Übertragungen.
+BOOT = secrets.token_hex(8)
+SETTINGS_COOKIE = "tb_settings"
+_set = {"code": None, "until": 0.0, "sessions": set()}
+_set_lock = threading.Lock()
+
+
+def _settings_store():
+    path = os.environ.get("TB_CONFIG_FILE", "")
+    if not path:
+        raise HTTPException(404, t("Einstellungen im Browser sind nicht aktiv (TB_CONFIG_FILE fehlt)"))
+    return setupcore.Store(path)
+
+
+def _settings_unlocked(request):
+    return CFG.ui_auth or request.cookies.get(SETTINGS_COOKIE) in _set["sessions"]
+
+
+def _settings_guard(request):
+    if not _settings_unlocked(request):
+        raise HTTPException(401, t("Einmal-Code erforderlich"))
+
+
+@app.get("/settings")
+def settings_page(request: Request):
+    _settings_store()
+    with open(os.path.join(STATIC, "setup.html"), encoding="utf-8") as f:
+        html = f.read()
+    html = html.replace('<html lang="de">', f'<html lang="{req_lang(request)}" data-mode="settings" '
+                                            f'data-api="/api/settings" data-auth="{int(CFG.ui_auth)}">', 1)
+    return HTMLResponse(html, headers={"Cache-Control": "no-store", "Vary": "Cookie, Accept-Language"})
+
+
+@app.get("/api/settings/ping")
+def settings_ping():
+    return {"boot": BOOT}
+
+
+@app.post("/api/settings/code")
+def settings_code():
+    """Ohne Login: neuen Einmal-Code ins Log schreiben."""
+    _settings_store()
+    if CFG.ui_auth:
+        return {"ok": True}
+    with _set_lock:
+        if not _set["code"] or time.time() > _set["until"]:
+            _set["code"] = setupcore.new_code()
+        _set["until"] = time.time() + 600
+        log.warning("Einstellungen: Einmal-Code (10 min gültig):  %s", _set["code"])
+    return {"ok": True}
+
+
+@app.post("/api/settings/unlock")
+async def settings_unlock(request: Request):
+    _settings_store()
+    try:
+        code = (await request.json()).get("code", "")
+    except ValueError:
+        code = ""
+    with _set_lock:
+        want = _set["code"] if time.time() <= _set["until"] else None
+        ok = bool(want) and hmac.compare_digest(setupcore.norm_code(code).encode(), setupcore.norm_code(want).encode())
+    if not ok:
+        log.warning("Einstellungen: falscher oder abgelaufener Einmal-Code von %s", _client(request))
+        await asyncio.sleep(1)
+        return JSONResponse({"error": t("Einmal-Code falsch oder abgelaufen")}, status_code=403)
+    tok = secrets.token_urlsafe(32)
+    with _set_lock:
+        _set["sessions"].add(tok)
+        _set["code"] = None  # nur einmal verwendbar
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie(SETTINGS_COOKIE, tok, httponly=True, samesite="strict", path="/", secure=request.url.scheme == "https")
+    return resp
+
+
+@app.get("/api/settings/state")
+def settings_state(request: Request):
+    store = _settings_store()
+    _settings_guard(request)
+    return {**store.state(), "version": __version__, "boot": BOOT, "auth": CFG.ui_auth}
+
+
+@app.post("/api/settings/test")
+async def settings_test(request: Request):
+    store = _settings_store()
+    _settings_guard(request)
+    try:
+        d = await request.json()
+    except ValueError:
+        d = {}
+    return await setupcore.run_test(store, d)
+
+
+@app.post("/api/settings/save")
+async def settings_save(request: Request):
+    store = _settings_store()
+    _settings_guard(request)
+    try:
+        payload = await request.json()
+    except ValueError:
+        payload = {}
+    if CFG.ui_auth:
+        pw = str(payload.get("currentPass") or "")
+        if not (pw and await asyncio.to_thread(_creds_ok, CFG.ui_user, pw)):
+            log.warning("Einstellungen: falsches aktuelles Passwort von %s", _client(request))
+            await asyncio.sleep(1)
+            return JSONResponse({"error": t("Aktuelles Passwort falsch")}, status_code=403)
+    if any(j["state"] not in FINAL for j in QUEUE.snapshot()):
+        return JSONResponse({"error": t("Es läuft noch eine Übertragung – bitte warten, bis die Warteschlange fertig ist")},
+                            status_code=409)
+    with _set_lock:
+        status, body = store.save(payload)
+    if status == 200:
+        setupcore.restart_later()
+    return JSONResponse(body, status_code=status)
 
 
 def abs_():

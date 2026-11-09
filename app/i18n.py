@@ -138,6 +138,10 @@ EN = {
     "Fehler: {name}": "Error: {name}",
     "{path} ist nicht beschreibbar (Docker: Volume für /config einhängen)": "{path} is not writable (Docker: mount a volume for /config)",
     "Speichern fehlgeschlagen ({name})": "Saving failed ({name})",
+    "Einstellungen im Browser sind nicht aktiv (TB_CONFIG_FILE fehlt)": "Settings in the browser are not active (TB_CONFIG_FILE missing)",
+    "Einmal-Code falsch oder abgelaufen": "One-time code wrong or expired",
+    "Aktuelles Passwort falsch": "Current password is wrong",
+    "Es läuft noch eine Übertragung – bitte warten, bis die Warteschlange fertig ist": "A transfer is still running – please wait until the queue is finished",
     # --- Discord
     "✅ teddybridge: **{name}** fertig": "✅ teddybridge: **{name}** done",
     "❌ teddybridge: **{name}** fehlgeschlagen: {err}": "❌ teddybridge: **{name}** failed: {err}",

@@ -55,7 +55,7 @@ def main():
     try:
         procs.append(subprocess.Popen([PY, "mock/mock_servers.py", "--data", os.path.join(tmp, "lib"), "--clean",
                                        "--abs-port", str(ABS_P), "--tc-port", str(TC_P), "--nd-port", str(ND_P),
-                                       "--tc-auth", f"tcuser:{TC_PW}"], cwd=ROOT))
+                                       "--encode-delay", "2", "--tc-auth", f"tcuser:{TC_PW}"], cwd=ROOT))
         app = subprocess.Popen([PY, "-m", "app"], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
         procs.append(app)
         wait(f"http://127.0.0.1:{TC_P}/_mock/log")
@@ -156,6 +156,71 @@ def main():
               "TeddyCloud mit eigener Anmeldung nach dem Neustart erreichbar")
         r = httpx.get(f"{base}/setup", follow_redirects=False)
         check(r.status_code != 200 or "Einmal-Code" not in r.text, "Einrichtung danach nicht mehr erreichbar")
+
+        print("Einstellungen ändern (mit Login)")
+        check(httpx.get(f"{base}/settings", follow_redirects=False).status_code == 303, "Einstellungen ohne Anmeldung -> Login")
+        check(httpx.get(f"{base}/api/settings/state").status_code == 401, "Einstellungen-API ohne Anmeldung gesperrt")
+        check(ui.get("/settings").status_code == 200 and "data-mode=\"settings\"" in ui.get("/settings").text, "Einstellungsseite angemeldet")
+        check(ui.get("/api/config").json().get("settings") is True, "Link zu den Einstellungen wird angeboten")
+        st = ui.get("/api/settings/state").json()
+        check(st["values"]["TC_URL"] == tc["TC_URL"] and st["secrets"]["TC_AUTH"] and st["secrets"]["UI_PASS_HASH"]
+              and st["fixed"] == ["TC_BASE"] and st["tcUser"] == "tcuser", "aktuelle Werte, Geheimnisse nur als gesetzt")
+        check(TC_PW not in str(st) and "mocktoken" not in str(st) and "scrypt" not in str(st), "keine Geheimnisse an den Browser")
+        r = ui.post("/api/settings/test", json={"kind": "tc", "values": {**tc, "tcUser": "tcuser"}}).json()
+        check(r["ok"], f"Test mit gespeichertem Passwort (leer gelassen) ({r['message']})")
+        change = {**tc, "tcUser": "tcuser", "useAbs": True, "ABS_URL": f"http://127.0.0.1:{ABS_P}", "useNd": True,
+                  "ND_URL": f"http://127.0.0.1:{ND_P}", "ND_USER": "nduser", "ND_PASS": "ndpassword55",
+                  "UI_USER": "admin", "UI_LANG": "en"}
+        r = ui.post("/api/settings/save", json=change)
+        check(r.status_code == 403, "Speichern ohne aktuelles Passwort abgelehnt")
+        r = ui.post("/api/settings/save", json={**change, "currentPass": "falsch"})
+        check(r.status_code == 403, "Speichern mit falschem Passwort abgelehnt")
+        ui.post("/api/jobs", json={"items": [{"id": "aaaa1111-0000-4000-8000-000000000001"}]})
+        r = ui.post("/api/settings/save", json={**change, "currentPass": UI_PW})
+        check(r.status_code == 409, f"Speichern während einer Übertragung abgelehnt ({r.status_code})")
+        for _ in range(100):
+            if all(j["state"] in ("done", "skipped", "error") for j in ui.get("/api/jobs").json()):
+                break
+            time.sleep(0.2)
+        boot = ui.get("/api/settings/ping").json()["boot"]
+        r = ui.post("/api/settings/save", json={**change, "currentPass": UI_PW})
+        check(r.status_code == 200, f"Änderung gespeichert ({r.text[:100]})")
+        end = time.time() + 30
+        while time.time() < end:
+            try:
+                if httpx.get(f"{base}/api/settings/ping", auth=("admin", UI_PW), timeout=2).json().get("boot") not in (None, boot):
+                    break
+            except (httpx.HTTPError, ValueError):
+                pass
+            time.sleep(0.3)
+        ui = httpx.Client(base_url=base, timeout=30, auth=("admin", UI_PW))
+        boot = ui.get("/api/settings/ping").json()["boot"]
+        cfg = ui.get("/api/config").json()
+        check(cfg.get("sources") == ["abs", "nd"] and cfg.get("langFixed") and app.pid == pid and app.poll() is None,
+              f"neu gestartet mit Navidrome und fester Sprache ({cfg.get('sources')})")
+        text = open(cfgfile).read()
+        check(f"TC_AUTH=tcuser:{TC_PW}" in text and "ABS_TOKEN=mocktoken" in text and "UI_PASS_HASH=scrypt:" in text,
+              "leer gelassene Geheimnisse behalten (TeddyCloud, ABS, Login)")
+
+        print("Einstellungen ändern (ohne Login: Einmal-Code)")
+        r = ui.post("/api/settings/save", json={**change, "noLogin": True, "currentPass": UI_PW})
+        check(r.status_code == 200, "Login abgeschaltet")
+        wait(f"{base}/api/settings/ping", lambda r: r.status_code == 200 and r.json().get("boot") != boot, timeout=30)
+        time.sleep(1)
+        anon = httpx.Client(base_url=base, timeout=30)
+        check(anon.get("/api/config").json().get("auth") is False, "läuft ohne Login")
+        check(anon.get("/api/settings/state").status_code == 401, "Einstellungen ohne Code gesperrt")
+        check(anon.post("/api/settings/unlock", json={"code": "AAAA-BBBB-CCCC"}).status_code == 403, "ohne angeforderten Code nichts")
+        anon.post("/api/settings/code")
+        time.sleep(0.5)
+        log.flush(); log.seek(0)
+        codes = re.findall(r"Einstellungen: Einmal-Code \(10 min gültig\):\s+([A-Z0-9-]{14})", log.read())
+        check(bool(codes), "Code auf Knopfdruck im Log")
+        r = anon.post("/api/settings/unlock", json={"code": codes[-1] if codes else ""})
+        check(r.status_code == 200 and anon.get("/api/settings/state").status_code == 200, "Code schaltet frei")
+        other = httpx.Client(base_url=base, timeout=30)
+        check(other.post("/api/settings/unlock", json={"code": codes[-1] if codes else ""}).status_code == 403,
+              "Code nur einmal verwendbar")
 
         log.flush(); log.seek(0)
         text = log.read()

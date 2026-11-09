@@ -81,11 +81,20 @@ def read_config_file(path):
     return out
 
 
+FROM_FILE = set()  # Schlüssel, die aus TB_CONFIG_FILE in os.environ übernommen wurden
+
+
 def apply_config_file(path):
     """Werte aus der Datei übernehmen, ausser die Umgebung setzt sie (nicht leer): Umgebung hat Vorrang."""
     for k, v in read_config_file(path).items():
         if not os.environ.get(k, "").strip():
             os.environ[k] = v
+            FROM_FILE.add(k)
+
+
+def original_environ():
+    """Umgebung ohne die aus der Datei übernommenen Werte (für den Neustart nach dem Speichern)."""
+    return {k: v for k, v in os.environ.items() if k not in FROM_FILE}
 
 
 def write_config_file(path, values):

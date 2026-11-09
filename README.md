@@ -74,7 +74,7 @@ Every connection can be tested before saving. Saving runs the same checks as a n
 
 **Where the settings are stored.** The Docker image uses `/config/teddybridge.env`, so mount a volume at `/config` (the compose template does). The systemd template uses `/var/lib/teddybridge/teddybridge.env`. Without `TB_CONFIG_FILE`, there is no setup page and missing values abort the start as before.
 
-**Changing settings later.** Edit the file and restart, or delete it and restart to run the setup again. Environment variables always take precedence over the file; the setup page shows such values as fixed.
+**Changing settings later.** Click *Settings* in the header. The page looks like the setup, pre-filled with the current values; passwords and tokens left empty keep their saved value. With a login, saving asks for the current teddybridge password. Without a login, the page first asks for a one-time code that a button writes to the log (valid for 10 minutes, usable once). Saving restarts teddybridge, so it is refused while a transfer is running or waiting; afterwards you log in again. Environment variables always take precedence over the file and are shown as fixed. To start over, delete the file and restart.
 
 ### Environment variables
 
@@ -225,7 +225,7 @@ If the browser does not allow the redirect without a click, an “Open teddybrid
 ```sh
 venv/bin/python tests/test_e2e.py     # end-to-end against mock servers
 venv/bin/python tests/test_audio.py   # MP3 merging and m4b chapters with real audio files (needs ffmpeg)
-venv/bin/python tests/test_setup.py   # setup in the browser: one-time code, connection tests, saving, restart
+venv/bin/python tests/test_setup.py   # setup and settings page: one-time codes, tests, saving, restart
 ```
 
 Starts mock servers for Audiobookshelf, Navidrome and TeddyCloud (`mock/`) plus a simulated NAS directory and checks login, browsing, transfer, duplicates, splitting, merging (verified byte by byte, or every chapter decoded and measured), m4b chapters (ABS and file source), multi-audiobook TAFs, starting with only one source, both languages, cleanup on errors, path escapes, security headers, and that **no secret appears in the log or UI**. Passwords in tests and mocks are made up.
@@ -269,10 +269,9 @@ teddybridge is built for a **trusted local network**. Whoever can log in may rea
 | File source: someone who can **write** to the share could in theory swap in a symlink between path check and open (TOCTOU) | low | Mount the share read-only; anyone with write access should be trusted |
 | Sessions in memory only, valid for 30 days | low | A restart logs everyone out |
 | Setup page (only without configuration): anyone with the one-time code from the log can configure the instance | low | Complete the setup right after the first start; the code is only shown in the log |
+| Settings page without login: anyone on the network can request a one-time code, but only someone who can read the log can use it | low | Set a login; then the page needs the session and the current password |
 
 ## Ideas for later versions
-
-- **Settings page** to change sources and logins after the first setup, without editing the file.
 
 - **Split long audiobooks into parts of about 60 min** (optional). Helps when switching between boxes (you lose at most the current part) and avoids the known issue that the box no longer saves the position for tracks longer than about 3 h 10 min.
 
