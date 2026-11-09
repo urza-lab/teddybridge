@@ -6,6 +6,7 @@ import secrets
 import logging
 import os
 import re
+import threading
 import time
 import urllib.parse
 import uuid
@@ -238,6 +239,58 @@ class Tc:
         self._url = urllib.parse.urlsplit(cfg.tc_url)
         self._auth_header = ("Basic " + base64.b64encode(":".join(cfg.tc_auth).encode()).decode()
                              if cfg.tc_auth else None)
+        # TeddyCloud-eigene Anmeldung (frontend.web_auth_enabled, seit 2026): POST /api/auth/login -> Session-Token,
+        # danach Cookie tc_web_session. Wird nur benutzt, wenn TeddyCloud mit 401 ohne WWW-Authenticate antwortet.
+        self._creds = cfg.tc_auth
+        self._session = None
+        self._login_lock = threading.Lock()
+        self._login_failed = 0.0  # Zeitpunkt der letzten abgelehnten Anmeldung (TeddyCloud sperrt nach 5 Fehlern)
+
+    SESSION_COOKIE = "tc_web_session"
+    LOGIN_BACKOFF = 300  # s nach abgelehnter Anmeldung nicht erneut versuchen
+
+    def _cookie(self):
+        s = self._session
+        return {"Cookie": f"{self.SESSION_COOKIE}={s}"} if s else {}
+
+    def _needs_login(self, r):
+        """401 von der TeddyCloud-Anmeldung (nicht von Basic Auth eines Proxys, die schickt WWW-Authenticate)."""
+        return r.status_code == 401 and self._creds and "www-authenticate" not in r.headers
+
+    def _login(self, old):
+        """Bei TeddyCloud anmelden (einmal für alle Threads). -> True, wenn eine (neue) Sitzung da ist."""
+        with self._login_lock:
+            if self._session and self._session != old:
+                return True  # ein anderer Thread hat sich inzwischen angemeldet
+            if time.time() - self._login_failed < self.LOGIN_BACKOFF:
+                raise ApiError(t("TeddyCloud: Anmeldung abgelehnt (TC_AUTH prüfen)"))
+            try:
+                r = self.c.post("/api/auth/login", json={"username": self._creds[0], "password": self._creds[1]},
+                                timeout=30.0)
+            except httpx.HTTPError as e:
+                raise ApiError(t("TeddyCloud {what}: Verbindungsfehler ({name})", what=t("Anmeldung"), name=type(e).__name__)) from None
+            finally:
+                self.c.cookies.clear()  # Set-Cookie nicht übernehmen, das Token wird selbst mitgeschickt
+            token = None
+            if r.status_code == 200:
+                try:
+                    token = r.json().get("token")
+                except ValueError:
+                    token = None
+            if not token or not isinstance(token, str) or not token.isalnum():
+                self._session = None
+                if r.status_code == 429:
+                    self._login_failed = time.time()
+                    raise ApiError(t("TeddyCloud: zu viele Anmeldeversuche, bitte später erneut versuchen"))
+                if r.status_code in (400, 401):
+                    self._login_failed = time.time()
+                    log.warning("TeddyCloud: Anmeldung abgelehnt (HTTP %s)", r.status_code)
+                    raise ApiError(t("TeddyCloud: Anmeldung abgelehnt (TC_AUTH prüfen)"))
+                raise ApiError(t("TeddyCloud {what}: HTTP {status}", what=t("Anmeldung"), status=r.status_code))
+            self._session = token
+            self._login_failed = 0.0
+            log.info("TeddyCloud: angemeldet (eigene Anmeldung von TeddyCloud)")
+            return True
 
     RETRY_STATUS = (502, 503, 504)  # kommt vom Reverse Proxy, wenn TeddyCloud kurz nicht antwortet
     TRIES = 5
@@ -246,12 +299,21 @@ class Tc:
         """Ein Aufruf; bei 502/503/504 oder Verbindungsfehler (nur wenn retry) mehrere Versuche.
         Datei-Objekte in `files` werden vor jedem Versuch zurückgespult."""
         tries = self.TRIES if retry else 1
-        for attempt in range(1, tries + 1):
+        relogged = False
+        attempt = 0
+        while attempt < tries:
+            attempt += 1
             for f in (kw.get("files") or {}).values():
                 f[1].seek(0)
+            old = self._session
             try:
                 r = self.c.request(method, path, params=params if params is not None else self.LIB,
-                                   timeout=timeout or self.c.timeout, **kw)
+                                   timeout=timeout or self.c.timeout, headers=self._cookie(), **kw)
+                if self._needs_login(r) and not relogged:
+                    relogged = True
+                    self._login(old)
+                    attempt -= 1  # Anmeldung zählt nicht als Versuch
+                    continue
             except httpx.HTTPError as e:
                 if attempt == tries:
                     raise ApiError(t("TeddyCloud {what}: Verbindungsfehler ({name})", what=what, name=type(e).__name__)) from None
@@ -351,6 +413,8 @@ class Tc:
             conn.putheader("User-Agent", UA)
             if self._auth_header:
                 conn.putheader("Authorization", self._auth_header)
+            for k, v in self._cookie().items():
+                conn.putheader(k, v)
             with open(local_path, "rb") as fh:
                 conn.endheaders(head + fh.read(1 << 16))  # Header + Body-Anfang in einem Paket
                 while chunk := fh.read(1 << 16):
@@ -358,7 +422,7 @@ class Tc:
             conn.send(tail)
             r = conn.getresponse()
             r.read()
-            return r.status
+            return r.status, r.getheader("WWW-Authenticate")
         finally:
             conn.close()
 
@@ -371,7 +435,11 @@ class Tc:
         got = last = None
         for attempt in range(1, self.UPLOAD_TRIES + 1):
             try:
-                status = self._send_upload(rel_dir, local_path, name)
+                old = self._session
+                status, www = self._send_upload(rel_dir, local_path, name)
+                if status == 401 and self._creds and not www:
+                    self._login(old)
+                    status, www = self._send_upload(rel_dir, local_path, name)
             except (OSError, http.client.HTTPException) as e:
                 status = None
                 log.warning("TeddyCloud Upload: %s, Versuch %d/%d", type(e).__name__, attempt, self.UPLOAD_TRIES)

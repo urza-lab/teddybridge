@@ -833,6 +833,46 @@ for path in ("/", "/login", "/api/config"):
         check(all(e["status"] != 401 for e in tclog), "TC: Basic Auth mitgeschickt")
         check(all("special=library" in e["path"] for e in tclog if e["path"].startswith("/api/")), "TC: immer special=library")
 
+        print("TeddyCloud-eigene Anmeldung (web_auth)")
+        def drop_taf(mark):
+            for dp, _, fns in os.walk(lib):
+                for fn in fns:
+                    if fn.endswith(f"[{mark}].taf"):
+                        os.remove(os.path.join(dp, fn))
+        def transfer_a():
+            n0 = len(c.get("/api/jobs").json())
+            c.post("/api/jobs", json={"items": [{"id": A}]})
+            return wait_jobs(c, n0 + 1)[-1]
+        wa = lambda **kw: httpx.post(f"http://127.0.0.1:{TC_P}/_mock/web-auth", json=kw).json()["logins"]
+        l0 = wa(enabled=True, reset=True)
+        drop_taf(A[:8])
+        j = transfer_a()
+        l1 = wa(enabled=True)
+        check(j["state"] == "done" and l1 - l0 == 1, f"Übertragen mit TeddyCloud-Anmeldung, einmal angemeldet ({j['state']}, {j.get('error')}, {l1 - l0} Anmeldungen)")
+        drop_taf(A[:8])
+        wa(enabled=True, reset=True)  # TeddyCloud neu gestartet: Sitzungen weg
+        j = transfer_a()
+        l2 = wa(enabled=True)
+        check(j["state"] == "done" and l2 - l1 == 1, f"nach Neustart von TeddyCloud neu angemeldet ({j['state']}, {l2 - l1} Anmeldungen)")
+        probe = r'''
+from app import config, clients
+cfg = config.load(); tc = clients.Tc(cfg)
+out = []
+for _ in range(2):
+    try:
+        tc.list_dir("")
+        out.append("ok")
+    except clients.ApiError as e:
+        out.append(str(e))
+print("RESULT", out)
+'''
+        penv = dict(env, TC_AUTH="tcuser:falsch", UI_PASS=UI_PW, UI_PASS_HASH="", LISTEN="127.0.0.1:1")
+        r = subprocess.run([PY, "-c", probe], cwd=ROOT, env=penv, capture_output=True, text=True, timeout=60)
+        l3 = wa(enabled=False)
+        check(r.stdout.count("Anmeldung abgelehnt (TC_AUTH prüfen)") == 2 and l3 - l2 == 1,
+              f"falsches TC_AUTH: klare Meldung, nur ein Anmeldeversuch (TeddyCloud sperrt nach 5) ({r.stdout[-160:]}{r.stderr[-200:]}, {l3 - l2})")
+        check("falsch" not in r.stdout + r.stderr, "Passwort nicht in der Ausgabe")
+
         applog.flush(); applog.seek(0)
         text = applog.read()
         page = c.get("/").text + str(c.get("/api/config").json()) + str(c.get("/api/jobs").json())

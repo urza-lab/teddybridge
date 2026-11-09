@@ -92,7 +92,7 @@ Both empty = **no login** (note in the log). That is fine if only trusted people
 |---|---|---|
 | `TC_BASE` | `teddybridge` | Base folder in the TeddyCloud library. Files are placed here and existing TAFs are searched here. |
 | `TC_BASE_EXTRA` | – | Further library folders (comma-separated) that are **only searched** for existing items – e.g. a previous base folder, so nothing is transferred twice. teddybridge never writes there; Tonies already assigned stay untouched. |
-| `TC_AUTH` | – | `user:pass` if TeddyCloud is behind Basic Auth |
+| `TC_AUTH` | – | `user:pass` if TeddyCloud requires a login: TeddyCloud's own web login (setting `frontend.web_auth_enabled`, newer versions) or Basic Auth of a proxy in front of it. teddybridge logs in once and keeps the session; after a rejected login it waits 5 minutes before trying again (TeddyCloud locks an IP after 5 failures for 10 minutes). In a Docker env file, put the value in single quotes if the password contains `$`, `"` or `\`. |
 | `LISTEN` | `0.0.0.0:8085` | Address and port |
 | `TRUSTED_PROXIES` | – | IP(s) of the reverse proxy, comma-separated (single IPs only). Then `X-Forwarded-For/-Proto` are honored: real client IP in the log, cookie with `Secure` on HTTPS. |
 | `DISCORD_WEBHOOK` | – | Discord webhook URL: message per job (done/error) and summary per batch. Read only at startup. |
@@ -237,7 +237,7 @@ teddybridge is built for a **trusted local network**. Whoever can log in may rea
 | With `FRAME_ANCESTORS`, the listed origins can frame teddybridge (clickjacking from there) | low | List only TeddyCloud's own address |
 | Failed attempts are delayed per request, but parallel attempts are not limited; no lockout | low (LAN) | Do not expose to the internet; rate-limit in the proxy if needed |
 | Navidrome login per the Subsonic protocol (`md5(password+salt)`) | low | Use a dedicated Navidrome user with its own password |
-| `TC_AUTH` is sent to TeddyCloud via Basic Auth, unencrypted over `http://` | low (LAN) | Reach TeddyCloud via HTTPS if possible |
+| `TC_AUTH` (and the TeddyCloud session) is sent to TeddyCloud unencrypted over `http://` | low (LAN) | Reach TeddyCloud via HTTPS if possible |
 | File source: someone who can **write** to the share could in theory swap in a symlink between path check and open (TOCTOU) | low | Mount the share read-only; anyone with write access should be trusted |
 | Sessions in memory only, valid for 30 days | low | A restart logs everyone out |
 

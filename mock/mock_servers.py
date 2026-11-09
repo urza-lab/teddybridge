@@ -9,6 +9,9 @@ TC-Mock:   Bibliothek = Verzeichnis --data. fileEncode schreibt eine Fake-TAF (I
 Discord:   POST /_mock/discord/<beliebig> sammelt Webhook-Meldungen, GET /_mock/discord liefert sie.
 Leer-Upload: POST /_mock/empty-uploads {"match": "<teil des pfads>", "mode": "once"|"always"} lässt
            fileUpload trotz 200 OK eine leere Datei anlegen (once: nur beim ersten Upload je Datei).
+Web-Auth:  POST /_mock/web-auth {"enabled": true|false, "reset": true} schaltet die TeddyCloud-eigene Anmeldung
+           (POST /api/auth/login, Cookie tc_web_session, 401 ohne WWW-Authenticate) ein/aus; reset = alle
+           Sitzungen ungültig (wie ein Neustart von TeddyCloud). Benutzer:Passwort = --tc-auth.
 ND-Mock:   Navidrome/Subsonic, Benutzer "nduser", Passwort "ndpassword55" (nur Token-Anmeldung t/s), nur GET.
            Ein Titel mit "DLFAIL" im Namen liefert beim Download einen Subsonic-Fehler (JSON, HTTP 200).
 Diagnose:  GET /_mock/log auf allen Ports liefert das Aufrufprotokoll als JSON, POST /_mock/reset leert es.
@@ -116,7 +119,7 @@ class Base(BaseHTTPRequestHandler):
             entry.update(extra)
         self.log.append(entry)
 
-    def send(self, status, body=b"", ctype="application/json", extra=None):
+    def send(self, status, body=b"", ctype="application/json", extra=None, headers=None):
         if isinstance(body, (dict, list)):
             body = json.dumps(body).encode()
         elif isinstance(body, str):
@@ -127,6 +130,8 @@ class Base(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -269,6 +274,9 @@ class TcHandler(Base):
     upload_delay = 0.0
     empty_uploads = {}   # match -> mode
     empty_seen = set()
+    web_auth = False
+    sessions = set()
+    logins = 0
 
     def _lib(self, q):
         if q.get("special") != "library":
@@ -326,12 +334,19 @@ class TcHandler(Base):
         self.send(404, "Not Found")
 
     def _auth_ok(self):
+        if TcHandler.web_auth:
+            ck = self.headers.get("Cookie") or ""
+            tok = next((c.split("=", 1)[1] for c in ck.replace(" ", "").split(";") if c.startswith("tc_web_session=")), None)
+            if tok in TcHandler.sessions:
+                return True
+            self.send(401, {"error": "unauthorized", "message": "Login required"})
+            return False
         if not self.auth:
             return True
         import base64
         exp = "Basic " + base64.b64encode(self.auth.encode()).decode()
         if self.headers.get("Authorization") != exp:
-            self.send(401, "Unauthorized")
+            self.send(401, "Unauthorized", headers={"WWW-Authenticate": 'Basic realm="teddycloud"'})
             return False
         return True
 
@@ -344,6 +359,24 @@ class TcHandler(Base):
             return self.send(204, b"", extra={"discord": True})
         if u.path == "/_mock/discord":
             return self.send(404, "")
+        if u.path == "/_mock/web-auth":
+            cfg = json.loads(self.body() or b"{}")
+            TcHandler.web_auth = bool(cfg.get("enabled"))
+            if cfg.get("reset"):
+                TcHandler.sessions.clear()
+            return self.send(200, {"logins": TcHandler.logins})
+        if u.path == "/api/auth/login" and TcHandler.web_auth:
+            TcHandler.logins += 1
+            try:
+                cred = json.loads(self.body() or b"{}")
+            except ValueError:
+                return self.send(400, {"error": "invalid_body"})
+            if f"{cred.get('username')}:{cred.get('password')}" != self.auth:
+                return self.send(401, {"error": "unauthorized", "message": "Invalid username or password"})
+            import secrets
+            tok = secrets.token_hex(32)
+            TcHandler.sessions.add(tok)
+            return self.send(200, {"ok": True, "username": cred["username"], "token": tok})
         if u.path == "/_mock/empty-uploads":
             cfg = json.loads(self.body() or b"{}")
             TcHandler.empty_uploads[cfg["match"]] = cfg["mode"]
