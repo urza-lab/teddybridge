@@ -36,6 +36,10 @@ class Config:
         return bool(self.ui_user and (self.ui_pass or self.ui_pass_hash))
 
     @property
+    def abs_enabled(self):
+        return bool(self.abs_url and self.abs_token)
+
+    @property
     def nd_enabled(self):
         return bool(self.nd_url and self.nd_user and self.nd_pass)
 
@@ -65,9 +69,14 @@ def _load_env_file(path):
 def load() -> Config:
     if os.environ.get("TB_ENV_FILE"):
         _load_env_file(os.environ["TB_ENV_FILE"])
-    missing =[k for k in ("ABS_URL", "ABS_TOKEN", "TC_URL") if not os.environ.get(k)]
-    if missing:
-        raise SystemExit(f"Fehlende Konfiguration: {', '.join(missing)}")
+    if not os.environ.get("TC_URL", "").strip():
+        raise SystemExit("Fehlende Konfiguration: TC_URL")
+    # Quellen: mindestens eine von ABS, Navidrome, Dateiquelle. Halb ausgefüllt = Tippfehler -> Startabbruch.
+    for name, keys in (("Audiobookshelf", ("ABS_URL", "ABS_TOKEN")), ("Navidrome", ("ND_URL", "ND_USER", "ND_PASS"))):
+        have = [k for k in keys if os.environ.get(k, "").strip()]
+        if have and len(have) < len(keys):
+            raise SystemExit(f"{name}: {', '.join(k for k in keys if k not in have)} fehlt "
+                             f"(entweder alle von {', '.join(keys)} setzen oder keine)")
     ui_user = os.environ.get("UI_USER", "").strip()
     ui_pass = os.environ.get("UI_PASS", "").strip()
     ui_hash = os.environ.get("UI_PASS_HASH", "").strip()
@@ -101,13 +110,16 @@ def load() -> Config:
         if any(p in ("", ".", "..") or p.startswith("_src_") or any(ord(ch) < 32 for ch in p) for p in parts):
             raise SystemExit("TC_BASE_EXTRA: relative Ordner der TeddyCloud-Bibliothek, mit Komma getrennt")
         extra.append(x)
+    if not (os.environ.get("ABS_URL", "").strip() or os.environ.get("ND_URL", "").strip() or fs_roots):
+        raise SystemExit("Keine Quelle konfiguriert: mindestens eine von Audiobookshelf (ABS_URL+ABS_TOKEN), "
+                         "Navidrome (ND_URL+ND_USER+ND_PASS) oder Dateiquelle (FS_ROOTS) einrichten")
     auth = os.environ.get("TC_AUTH", "").strip()
     tc_auth = tuple(auth.split(":", 1)) if ":" in auth else None
     listen = os.environ.get("LISTEN", "0.0.0.0:8085")
     host, _, port = listen.rpartition(":")
     return Config(
-        abs_url=os.environ["ABS_URL"].rstrip("/"),
-        abs_token=os.environ["ABS_TOKEN"].strip(),
+        abs_url=os.environ.get("ABS_URL", "").strip().rstrip("/"),
+        abs_token=os.environ.get("ABS_TOKEN", "").strip(),
         tc_url=os.environ["TC_URL"].rstrip("/"),
         tc_auth=tc_auth,
         tc_base=os.environ.get("TC_BASE", "teddybridge").strip().strip("/") or "teddybridge",

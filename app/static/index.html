@@ -149,11 +149,11 @@ async function init(){
     if(cfg.readonly){ st.readonly=true; document.querySelector('header h1').textContent='teddybridge (nur lesen)'; }
     document.querySelectorAll('.base').forEach(e=>e.textContent=cfg.tcBase);
     const so=load('sort'); if(so&&[...$('#sort').options].some(o=>o.value===so)) $('#sort').value=so;
-    const srcs=cfg.sources||['abs'];
+    const srcs=(cfg.sources&&cfg.sources.length)?cfg.sources:['abs'];
     $('#srcTabs').hidden=srcs.length<2;
     for(const b of document.querySelectorAll('#srcTabs button')) b.hidden=!srcs.includes(b.dataset.src);
     const saved=load('src');
-    await selectSrc(srcs.includes(saved)?saved:'abs');
+    await selectSrc(srcs.includes(saved)?saved:srcs[0]);
   }catch(e){msg(e.message);}
   refreshPresent(); poll();
 }

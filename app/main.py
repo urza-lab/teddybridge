@@ -26,14 +26,14 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger("teddybridge")
 
 CFG = config.load()
-ABS = Abs(CFG)
+ABS = Abs(CFG) if CFG.abs_enabled else None
 TC = Tc(CFG)
 _libs = {"t": 0, "names": {}}
 
 
 def lib_name(lib_id):
     if lib_id not in _libs["names"] or time.time() - _libs["t"] > 600:
-        _libs["names"] = {l["id"]: l["name"] for l in ABS.libraries()}
+        _libs["names"] = {l["id"]: l["name"] for l in abs_().libraries()}
         _libs["t"] = time.time()
     return _libs["names"].get(lib_id, "Bibliothek")
 
@@ -56,7 +56,7 @@ for _n, _p in CFG.fs_roots:
     if not os.path.isdir(_p):
         log.warning("Dateiquelle „%s“: Ordner nicht vorhanden oder nicht lesbar (nicht eingehängt?)", _n)
 
-QUEUE = Queue(CFG, Abs(CFG), Tc(CFG), lib_name,  # eigene Verbindungen für den Worker-Thread
+QUEUE = Queue(CFG, Abs(CFG) if CFG.abs_enabled else None, Tc(CFG), lib_name,  # eigene Verbindungen für den Worker-Thread
               nd=Nd(CFG) if CFG.nd_enabled else None, nd_folder_name=nd_folder_name, fs=FS)
 READONLY = os.environ.get("TB_READONLY") == "1"
 if READONLY:
@@ -248,13 +248,19 @@ def index():
 @app.get("/api/config")
 def get_config():
     return {"tcBase": CFG.tc_base, "maxFiles": MAX_FILES, "discord": bool(CFG.discord_webhook), "readonly": READONLY, "auth": CFG.ui_auth,
-            "sources": ["abs"] + (["nd"] if ND else []) + (["fs"] if FS else [])}
+            "sources": (["abs"] if ABS else []) + (["nd"] if ND else []) + (["fs"] if FS else [])}
+
+
+def abs_():
+    if not ABS:
+        raise HTTPException(404, "Audiobookshelf ist nicht konfiguriert")
+    return ABS
 
 
 @app.get("/api/libraries")
 def libraries():
     return [{"id": l["id"], "name": l["name"]}
-            for l in ABS.libraries() if l.get("mediaType", "book") == "book"]
+            for l in abs_().libraries() if l.get("mediaType", "book") == "book"]
 
 
 @app.get("/api/libraries/{lib}/items")
@@ -262,26 +268,26 @@ def items(lib: str, page: int = Query(0, ge=0), limit: int = Query(48, ge=1, le=
           sort: str = Query("media.metadata.title"), desc: bool = False):
     if sort not in ("media.metadata.title", "addedAt", "media.duration", "media.metadata.authorName"):
         sort = "media.metadata.title"
-    d = ABS.items(lib, limit, page, sort, desc)
+    d = abs_().items(lib, limit, page, sort, desc)
     return {"items": [simplify(i) for i in d.get("results", [])], "total": d.get("total", 0),
             "page": page, "limit": limit}
 
 
 @app.get("/api/libraries/{lib}/search")
 def search(lib: str, q: str = Query(..., min_length=1, max_length=200)):
-    d = ABS.search(lib, q)
+    d = abs_().search(lib, q)
     return {"items": [simplify(b["libraryItem"]) for b in d.get("book", []) if b.get("libraryItem")]}
 
 
 @app.get("/api/libraries/{lib}/collections")
 def collections(lib: str):
     return [{"id": c["id"], "name": c["name"], "count": len(c.get("books") or [])}
-            for c in ABS.collections(lib)]
+            for c in abs_().collections(lib)]
 
 
 @app.get("/api/libraries/{lib}/collections/{cid}")
 def collection_items(lib: str, cid: str):
-    for c in ABS.collections(lib):
+    for c in abs_().collections(lib):
         if c.get("id") == cid:
             return {"id": cid, "name": c["name"], "items": [simplify(b) for b in c.get("books") or []]}
     raise HTTPException(404, "Sammlung nicht gefunden")
@@ -290,7 +296,7 @@ def collection_items(lib: str, cid: str):
 @app.get("/api/libraries/{lib}/series")
 def series(lib: str):
     out = [{"id": s["id"], "name": s["name"], "count": len(s.get("books") or []),
-            "coverId": (s.get("books") or [{}])[0].get("id")} for s in ABS.series(lib)]
+            "coverId": (s.get("books") or [{}])[0].get("id")} for s in abs_().series(lib)]
     return sorted(out, key=lambda s: s["name"].lower())
 
 
@@ -298,7 +304,7 @@ def series(lib: str):
 def series_items(lib: str, sid: str, page: int = Query(0, ge=0), limit: int = Query(48, ge=1, le=200)):
     check_id(sid)
     flt = "series." + base64.b64encode(sid.encode()).decode()
-    d = ABS.items(lib, limit, page, "sequence", False, filter=flt)
+    d = abs_().items(lib, limit, page, "sequence", False, filter=flt)
     return {"items": [simplify(i) for i in d.get("results", [])], "total": d.get("total", 0),
             "page": page, "limit": limit}
 
@@ -311,7 +317,7 @@ def cover(item_id: str):
     check_id(item_id)
     hit = _cover_cache.get(item_id)
     if not hit or time.time() - hit[0] > 3600:
-        res = ABS.cover(item_id)
+        res = abs_().cover(item_id)
         if not res:
             return Response(status_code=404)
         if len(_cover_cache) > 500:
@@ -493,6 +499,8 @@ class JobRequest(BaseModel):
 def submit(req: JobRequest):
     if READONLY:
         raise HTTPException(403, "Nur-Lese-Modus: Übertragen ist deaktiviert")
+    if any(i.source == "abs" for i in req.items) and not ABS:
+        raise HTTPException(400, "Audiobookshelf ist nicht konfiguriert")
     if any(i.source == "nd" for i in req.items) and not ND:
         raise HTTPException(400, "Navidrome ist nicht konfiguriert")
     if any(i.source == "fs" for i in req.items) and not FS:

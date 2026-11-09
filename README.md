@@ -11,10 +11,10 @@ Weboberfläche, um Hörspiele und Musik aus **Audiobookshelf**, **Navidrome** od
 | | |
 |---|---|
 | **Zweck** | Hörspiele/Alben aus vorhandenen Medienservern in TeddyCloud bringen, ohne Dateien von Hand zu kopieren und umzuwandeln. |
-| **Quellen** | Audiobookshelf (Pflicht), Navidrome (optional), Ordner im Dateisystem, z. B. NAS per NFS/SMB (optional). Alle **nur lesend**. |
+| **Quellen** | Audiobookshelf, Navidrome und/oder Ordner im Dateisystem (z. B. NAS per NFS/SMB) – mindestens eine davon, beliebig kombinierbar. Alle **nur lesend**. |
 | **Ziel** | TeddyCloud-Bibliothek. Es wird nur angelegt; gelöscht werden ausschliesslich die eigenen temporären `_src_*`-Ordner – und eine TAF, die derselbe Lauf selbst angelegt hat und die nach einem Abbruch von TeddyCloud nachweislich unvollständig ist (vor dem automatischen Neuversuch). |
 | **Technik** | Python 3.11+, FastAPI/uvicorn, httpx, eine HTML-Seite mit Vanilla-JS ohne Build-Schritt. Keine Datenbank. Optional ffmpeg (m4b-Kapitel, Zusammenfügen anderer Formate als MP3). |
-| **Betrieb** | systemd-Dienst mit gehärteter Unit (Vorlage in `deploy/`). Gedacht für ein vertrauenswürdiges Heimnetz, optional hinter einem internen Reverse Proxy mit HTTPS. **Nicht ins Internet stellen.** |
+| **Betrieb** | Docker-Container (fertiges Image `ghcr.io/urza-lab/teddybridge`) oder systemd-Dienst, beide gehärtet (Vorlagen in `deploy/`). Gedacht für ein vertrauenswürdiges Heimnetz, optional hinter einem internen Reverse Proxy mit HTTPS. **Nicht ins Internet stellen.** |
 | **Sicherheit** | Login mit scrypt-Hash und HttpOnly-Session-Cookie. Zugangsdaten zu ABS, Navidrome und TeddyCloud bleiben im Backend. Security-Header (CSP, `frame-ancestors 'none'`). Keine bekannten Schwachstellen in den Abhängigkeiten (pip-audit, Stand 2026-11-08). Details siehe [Sicherheit](#sicherheit). |
 
 ## Funktionsweise
@@ -24,10 +24,10 @@ Weboberfläche, um Hörspiele und Musik aus **Audiobookshelf**, **Navidrome** od
 3. **Übertragen:** Ausgewählte Einträge kommen in eine Warteschlange und werden **nacheinander** abgearbeitet, weil TeddyCloud beim Umwandeln viel CPU braucht:
    1. temporären Ordner `<ziel>/_src_<id>` in TeddyCloud anlegen,
    2. Audiodateien einzeln aus der Quelle laden (lokales Temp-Verzeichnis) und hochladen,
-   3. TeddyCloud wandelt sie in **eine** TAF um (`fileEncode`, max. 99 Dateien; grössere Hörspiele können in Teile gesplittet werden),
+   3. TeddyCloud wandelt sie in **eine** TAF um (`fileEncode`, max. 99 Dateien; bei mehr wird zusammengefügt oder aufgeteilt, siehe [Mehr als 99 Dateien](#mehr-als-99-dateien)),
    4. TAF prüfen und `_src_` wieder löschen, auch bei Fehlern.
    5. Bricht TeddyCloud beim Umwandeln ab (z. B. Neustart oder Backup des Hosts), wartet teddybridge bis zu 45 min, bis TeddyCloud wieder antwortet, und prüft die TAF: wächst sie noch, wird gewartet; ist sie vollständig, ist der Auftrag fertig; ist sie unvollständig, wird diese eigene halbe TAF entfernt und aus den noch vorhandenen `_src_`-Dateien neu umgewandelt (höchstens 2 Neuversuche). Eine halbe TAF aus einem früheren Lauf wird nie gelöscht, sondern beim nächsten Übertragen gemeldet.
-4. **Ablage:** automatisch `TC_BASE/<Bibliothek>/<Serie oder Autor>` bzw. `TC_BASE/<Freigabe>/<Ordnerpfad>`, alternativ ein frei gewählter Unterordner.
+4. **Ablage:** automatisch `TC_BASE/<Bibliothek>/<Serie oder Autor>` (Audiobookshelf), `TC_BASE/<Musikordner>/<Album-Künstler>` bzw. `TC_BASE/Playlists` (Navidrome), `TC_BASE/<Freigabe>/<Ordnerpfad>` (Dateiquelle), alternativ ein frei gewählter Unterordner.
 5. **Fortschritt:** Die Warteschlange im Browser zeigt pro Auftrag einen Balken, Prozent und die geschätzte Restzeit mit Uhrzeit („noch ca. 25 min, fertig ~20:15“). Beim Laden aus dem bisherigen Tempo; beim Umwandeln, für das TeddyCloud keinen Fortschritt meldet, aus der wachsenden TAF-Datei (TeddyCloud schreibt gleichmässig ca. 0,65 MB je Hörminute, ca. 17-fache Echtzeit). Beide Werte lernt teddybridge aus jedem fertigen Auftrag nach.
 6. **Meldung:** optional per Discord-Webhook pro Auftrag – ✅ fertig (Kapitel, Dauer, Ordner) bzw. ❌ Fehler mit Grund; bei mehreren Aufträgen zusätzlich die Summe („x übertragen, y übersprungen, z Fehler“). Erwähnungen (`@everyone` o. ä. in Titeln) sind abgeschaltet.
 
@@ -59,15 +59,21 @@ Ab zwei ausgewählten Einträgen gibt es „**als eine TAF**“ mit einem frei w
 
 ## Konfiguration
 
-Alle Einstellungen kommen aus Umgebungsvariablen, unter systemd aus `/etc/teddybridge/teddybridge.env` (Vorlage: `deploy/teddybridge.env.example`, Rechte `600`). Fehlende oder ungültige Pflichtwerte brechen den Start mit einer Meldung ab, ohne Werte auszugeben.
+Alle Einstellungen kommen aus Umgebungsvariablen, unter systemd aus `/etc/teddybridge/teddybridge.env`, unter Docker aus der `env_file` der Compose-Datei (Vorlage: `deploy/teddybridge.env.example`, Rechte `600`). Fehlende oder ungültige Pflichtwerte brechen den Start mit einer Meldung ab, ohne Werte auszugeben.
 
 ### Zwingend
 
 | Variable | Bedeutung |
 |---|---|
-| `ABS_URL` | Adresse von Audiobookshelf, z. B. `http://abs.example:13378` |
-| `ABS_TOKEN` | API-Token eines **eigenen** ABS-Benutzers mit Lese- und Downloadrecht auf die gewünschten Bibliotheken |
 | `TC_URL` | Adresse der TeddyCloud-Weboberfläche |
+
+Dazu **mindestens eine Quelle**; mehrere lassen sich kombinieren, die Oberfläche zeigt dann Reiter. Eine Quelle ist entweder vollständig ausgefüllt oder ganz leer – halb ausgefüllt (z. B. `ABS_URL` ohne `ABS_TOKEN`) bricht den Start ab, damit ein Tippfehler nicht unbemerkt bleibt.
+
+| Quelle | Variablen | Bedeutung |
+|---|---|---|
+| Audiobookshelf | `ABS_URL`, `ABS_TOKEN` | Adresse, z. B. `http://abs.example:13378`, und API-Token eines **eigenen** ABS-Benutzers mit Lese- und Downloadrecht auf die gewünschten Bibliotheken |
+| Navidrome | `ND_URL`, `ND_USER`, `ND_PASS` | Adresse und Zugang eines eigenen Benutzers **ohne** Adminrechte |
+| Dateiquelle | `FS_ROOTS` | `Name=/pfad`, mehrere mit `;`, z. B. `Hörspiele=/mnt/nas/hoerspiele;Musik=/mnt/nas/musik` (siehe [Dateiquelle](#dateiquelle-nas)) |
 
 ### Dringend empfohlen
 
@@ -78,20 +84,18 @@ Alle Einstellungen kommen aus Umgebungsvariablen, unter systemd aus `/etc/teddyb
 
 Beide leer = **kein Login** (Warnung im Log). Nur eines gesetzt oder Hash ungültig = Startabbruch. `UI_PASS` im Klartext wird noch akzeptiert (mit Warnung), der Hash hat Vorrang.
 
-**Passwort vergessen?** Mit `python -m app.pwhash` einen neuen Hash erzeugen, in die env-Datei eintragen und den Dienst neu starten.
+**Passwort vergessen?** Mit `python -m app.pwhash` (Docker: `docker compose run --rm -it teddybridge python -m app.pwhash`) einen neuen Hash erzeugen, in die env-Datei eintragen und den Dienst bzw. Container neu starten.
 
 ### Optional
 
 | Variable | Standard | Bedeutung |
 |---|---|---|
-| `TC_BASE` | `teddybridge` | Basisordner in der TeddyCloud-Bibliothek. Die Duplikaterkennung sucht nur hier. |
+| `TC_BASE` | `teddybridge` | Basisordner in der TeddyCloud-Bibliothek. Hier wird abgelegt und nach vorhandenen TAFs gesucht. |
 | `TC_BASE_EXTRA` | – | Weitere Ordner der Bibliothek (mit Komma getrennt), die **nur durchsucht** werden, ob ein Hörbuch schon vorhanden ist – z. B. ein früherer Basisordner, damit nichts doppelt übertragen wird. Dort wird nie geschrieben; bereits zugewiesene Tonies bleiben unberührt. |
 | `TC_AUTH` | – | `user:pass`, falls TeddyCloud hinter Basic Auth liegt |
 | `LISTEN` | `0.0.0.0:8085` | Adresse und Port |
 | `TRUSTED_PROXIES` | – | IP(s) des Reverse Proxys, mit Komma getrennt (nur einzelne IPs). Dann gelten `X-Forwarded-For/-Proto`: echte Client-IP im Log, Cookie mit `Secure` bei HTTPS. |
 | `DISCORD_WEBHOOK` | – | Discord-Webhook-URL: Meldung pro Auftrag (fertig/Fehler) und Summe pro Stapel. Wird nur beim Start gelesen. |
-| `ND_URL`, `ND_USER`, `ND_PASS` | – | Navidrome als Quelle (alle drei nötig). Eigenen Benutzer ohne Adminrechte verwenden. |
-| `FS_ROOTS` | – | Dateiquelle: `Name=/pfad`, mehrere mit `;`, z. B. `Hörspiele=/mnt/nas/hoerspiele;Musik=/mnt/nas/musik` |
 
 Keine Kommentare hinter Werten: systemd liest sie als Teil des Werts.
 
@@ -161,7 +165,7 @@ venv/bin/python tests/test_e2e.py     # Ende-zu-Ende gegen Mock-Server
 venv/bin/python tests/test_audio.py   # MP3-Zusammenfügen und m4b-Kapitel mit echten Audiodateien (braucht ffmpeg)
 ```
 
-Startet Mock-Server für Audiobookshelf, Navidrome und TeddyCloud (`mock/`) sowie ein nachgebautes NAS-Verzeichnis und prüft Login, Stöbern, Übertragen, Duplikate, Aufteilen, Zusammenfügen (bytegenau nachgerechnet bzw. jedes Kapitel dekodiert und nachgemessen), m4b-Kapitel (ABS und Dateiquelle), Sammel-TAFs, Aufräumen bei Fehlern, Pfad-Ausbrüche, Security-Header und dass **kein Geheimnis in Log oder Oberfläche** erscheint. Die Passwörter in Tests und Mock sind frei erfunden.
+Startet Mock-Server für Audiobookshelf, Navidrome und TeddyCloud (`mock/`) sowie ein nachgebautes NAS-Verzeichnis und prüft Login, Stöbern, Übertragen, Duplikate, Aufteilen, Zusammenfügen (bytegenau nachgerechnet bzw. jedes Kapitel dekodiert und nachgemessen), m4b-Kapitel (ABS und Dateiquelle), Sammel-TAFs, Start mit nur einer Quelle, Aufräumen bei Fehlern, Pfad-Ausbrüche, Security-Header und dass **kein Geheimnis in Log oder Oberfläche** erscheint. Die Passwörter in Tests und Mock sind frei erfunden.
 
 ## Sicherheit
 
@@ -181,7 +185,7 @@ teddybridge ist für ein **vertrauenswürdiges lokales Netz** gebaut. Wer sich a
 - **Injection:** Alle IDs, die in URLs der Quellen landen, werden per Whitelist-Regex geprüft. Ziel- und Dateinamen werden bereinigt (kein `..`, keine Steuerzeichen, nie `_src_`). Das Frontend erzeugt DOM-Knoten mit `textContent` und nutzt kein `innerHTML`; Titel und Dateinamen können daher kein HTML einschleusen.
 - **Dateiquelle:** Die IDs sind base64url des relativen Pfads. `..`, absolute Pfade, NUL und Symlinks aus der Freigabe heraus werden abgelehnt, auch beim Kopieren erneut geprüft. Nur normale Dateien, Cover max. 10 MB, Suche begrenzt (20 000 Ordner, 8 s).
 - **Löschen in TeddyCloud** nur im eigenen `_src_*`-Ordner. Das prüft der Code vor jedem Löschaufruf. Einzige Ausnahme: die TAF, die derselbe Lauf gerade selbst angelegt hat, wenn sie nach einem Abbruch von TeddyCloud nachweislich unvollständig ist (Kopf ungültig oder falsche Kapitelzahl, Grösse unverändert) – vor dem Neuversuch bzw. beim Aufgeben. Eine TAF, die vor dem Lauf schon existierte, wird nie gelöscht.
-- **Betrieb:** eigener Systembenutzer und gehärtete systemd-Unit (`NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, `RestrictAddressFamilies`, `UMask=0077`, …).
+- **Betrieb:** eigener Systembenutzer und gehärtete systemd-Unit (`NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, `RestrictAddressFamilies`, `UMask=0077`, …) bzw. Container ohne Root, mit schreibgeschütztem Dateisystem, `cap_drop: ALL` und `no-new-privileges`.
 - **Abhängigkeiten:** `pip-audit` meldet keine bekannten Schwachstellen.
 
 **Im Audit gefunden und behoben**

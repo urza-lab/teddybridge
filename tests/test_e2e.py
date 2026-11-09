@@ -257,6 +257,39 @@ def main():
         ok_cfg = cfg_err(TC_BASE_EXTRA=" alt/ , noch/einer ,")
         check(not isinstance(ok_cfg, str) and ok_cfg.tc_scan_bases == (BASE, "alt", "noch/einer"), "TC_BASE_EXTRA: Liste bereinigt")
 
+        print("Quellen: mindestens eine, ABS optional")
+        nosrc = dict(ABS_URL="", ABS_TOKEN="", ND_URL="", ND_USER="", ND_PASS="", FS_ROOTS="")
+        e = cfg_err(**nosrc)
+        check(isinstance(e, str) and "mindestens eine" in e, "keine Quelle: Startabbruch")
+        check(isinstance(cfg_err(**dict(nosrc, ABS_URL="http://x")), str), "nur ABS_URL ohne Token: Startabbruch")
+        check(isinstance(cfg_err(**dict(nosrc, ND_URL="http://x", ND_USER="u")), str), "Navidrome halb: Startabbruch")
+        for label, kw in (("nur Navidrome", dict(ND_URL=env["ND_URL"], ND_USER="nduser", ND_PASS=ND_PW)),
+                          ("nur Dateiquelle", dict(FS_ROOTS=env["FS_ROOTS"])),
+                          ("nur ABS", dict(ABS_URL=env["ABS_URL"], ABS_TOKEN="mocktoken"))):
+            sc = cfg_err(**dict(nosrc, **kw))
+            check(not isinstance(sc, str), f"{label}: startet")
+        sc = cfg_err(**dict(nosrc, ND_URL=env["ND_URL"], ND_USER="nduser", ND_PASS=ND_PW))
+        check(not sc.abs_enabled and sc.nd_enabled, "ohne ABS: abs_enabled False")
+        # App ohne ABS (nur Navidrome + Dateiquelle): Quellenliste, ABS-Endpunkte 404, ABS-Auftrag 400
+        probe = r'''
+import json
+from fastapi.testclient import TestClient
+from app import main
+c = TestClient(main.app); c.auth = ("admin", main.CFG.ui_pass)
+out = {"sources": c.get("/api/config").json()["sources"], "libs": c.get("/api/libraries").status_code,
+       "cover": c.get("/api/cover/abcd1234").status_code,
+       "job": c.post("/api/jobs", json={"items": [{"id": "abcd1234", "source": "abs", "title": "x"}]}).status_code}
+print("RESULT" + json.dumps(out))
+'''
+        penv = dict(env, ABS_URL="", ABS_TOKEN="", UI_PASS=UI_PW, UI_PASS_HASH="", LISTEN="127.0.0.1:1")
+        r = subprocess.run([PY, "-c", probe], cwd=ROOT, env=penv, capture_output=True, text=True, timeout=60)
+        line = next((l for l in r.stdout.splitlines() if l.startswith("RESULT")), None)
+        res = json.loads(line[6:]) if line else {}
+        check(res.get("sources") == ["nd", "fs"], f"ohne ABS: Quellen nur nd+fs ({res.get('sources')})")
+        check(res.get("libs") == 404 and res.get("cover") == 404, "ohne ABS: ABS-Endpunkte 404")
+        check(res.get("job") == 400, "ohne ABS: ABS-Auftrag abgelehnt (400)")
+        check("mocktoken" not in r.stdout + r.stderr, "ohne ABS: kein Token in Ausgabe")
+
         print("Folgennummern")
         sys.path.insert(0, ROOT)
         from app.worker import numbered, series_seq
