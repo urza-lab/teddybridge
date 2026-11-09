@@ -8,8 +8,12 @@ Type=simple
 User=teddybridge
 Group=teddybridge
 WorkingDirectory=/opt/teddybridge
-EnvironmentFile=/etc/teddybridge/teddybridge.env
-Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+# optional: configuration as env file; "-" = may be missing (then the setup in the browser is used)
+EnvironmentFile=-/etc/teddybridge/teddybridge.env
+# settings from the setup in the browser (since 1.2); variables from the env file take precedence
+Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TB_CONFIG_FILE=/var/lib/teddybridge/teddybridge.env
+StateDirectory=teddybridge
+StateDirectoryMode=0700
 ExecStart=/opt/teddybridge/venv/bin/python -m app
 Restart=on-failure
 RestartSec=5

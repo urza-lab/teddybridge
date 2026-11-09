@@ -14,7 +14,7 @@ A web UI to browse audiobooks, radio plays and music from **Audiobookshelf**, **
 | **Sources** | Audiobookshelf, Navidrome and/or folders in the file system (e.g. a NAS via NFS/SMB) – at least one, any combination. All **read-only**. |
 | **Target** | The TeddyCloud library. teddybridge only creates files. It deletes nothing but its own temporary `_src_*` folders – and a TAF that the same run created itself and that is provably incomplete after TeddyCloud aborted (before the automatic retry). |
 | **Tech** | Python 3.11+, FastAPI/uvicorn, httpx, a single HTML page with vanilla JS and no build step. No database. Optional ffmpeg (m4b chapters, merging formats other than MP3). |
-| **Deployment** | Docker container (prebuilt image `ghcr.io/urza-lab/teddybridge`) or systemd service, both hardened (templates in `deploy/`). Meant for a trusted home network, optionally behind an internal reverse proxy with HTTPS. **Do not expose it to the internet.** |
+| **Deployment** | Docker container (prebuilt image `ghcr.io/urza-lab/teddybridge`) or systemd service, both hardened (templates in `deploy/`). First-time setup in the browser (since 1.2) or via environment variables. Meant for a trusted home network, optionally behind an internal reverse proxy with HTTPS. **Do not expose it to the internet.** |
 | **Security** | Login with scrypt hash and HttpOnly session cookie. Credentials for ABS, Navidrome and TeddyCloud stay in the backend. Security headers (CSP; framing only by origins listed in `FRAME_ANCESTORS`). No known vulnerabilities in dependencies (pip-audit, as of 2026-11-08). See [Security](#security). |
 
 ## How it works
@@ -59,7 +59,26 @@ With two or more selected items you can choose “**as one TAF**” with a name 
 
 ## Configuration
 
-All settings come from environment variables: under systemd from `/etc/teddybridge/teddybridge.env`, under Docker from the compose file's `env_file` (template: `deploy/teddybridge.env.example`, permissions `600`). Missing or invalid required values abort the start with a message that does not reveal any values.
+### Setup in the browser (since 1.2)
+
+Start teddybridge without configuration and open `http://<host>:8085/`. A setup page asks for:
+
+1. the TeddyCloud address, plus user and password if TeddyCloud requires a login
+2. at least one source: Audiobookshelf, Navidrome or folders
+3. the login for teddybridge, or none
+4. optional settings: language, base folder, embedding in TeddyCloud, reverse proxy, Discord
+
+Every connection can be tested before saving. Saving runs the same checks as a normal start, writes the settings to `TB_CONFIG_FILE` with permissions `600` and restarts teddybridge with them. Passwords and tokens are never shown again, only marked as saved. The login is stored as a hash.
+
+**One-time code.** The setup page first asks for a one-time code from the log (`docker logs teddybridge` or `journalctl -u teddybridge`). Without the code nobody can take over a fresh instance that someone else reached first.
+
+**Where the settings are stored.** The Docker image uses `/config/teddybridge.env`, so mount a volume at `/config` (the compose template does). The systemd template uses `/var/lib/teddybridge/teddybridge.env`. Without `TB_CONFIG_FILE`, there is no setup page and missing values abort the start as before.
+
+**Changing settings later.** Edit the file and restart, or delete it and restart to run the setup again. Environment variables always take precedence over the file; the setup page shows such values as fixed.
+
+### Environment variables
+
+All settings can also come from environment variables: under systemd from `/etc/teddybridge/teddybridge.env`, under Docker from the compose file's `env_file` (template: `deploy/teddybridge.env.example`, permissions `600`). A variable that is set and not empty wins over the setup file. Without setup, missing or invalid required values abort the start with a message that does not reveal any values.
 
 ### Required
 
@@ -110,16 +129,20 @@ cd /opt/teddybridge
 python3 -m venv venv && venv/bin/pip install -r requirements.txt
 apt install ffmpeg                   # optional: m4b chapters, merging m4a/FLAC/Ogg
 
+cp deploy/teddybridge.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now teddybridge
+journalctl -u teddybridge -f         # shows the one-time code for the setup
+```
+
+Then open `http://<host>:8085/` and follow the [setup](#setup-in-the-browser-since-12). To configure with an env file instead:
+
+```sh
 install -d -m 750 -o teddybridge -g teddybridge /etc/teddybridge
 install -m 600 -o teddybridge -g teddybridge deploy/teddybridge.env.example /etc/teddybridge/teddybridge.env
 venv/bin/python -m app.pwhash        # put the hash into the env file, fill in the other values
-
-cp deploy/teddybridge.service /etc/systemd/system/
-systemctl daemon-reload && systemctl enable --now teddybridge
-journalctl -u teddybridge -f
+systemctl restart teddybridge
 ```
-
-Then reachable at `http://<host>:8085/`. For manual starts: `TB_ENV_FILE=/etc/teddybridge/teddybridge.env venv/bin/python -m app`.
+ For manual starts: `TB_ENV_FILE=/etc/teddybridge/teddybridge.env venv/bin/python -m app`.
 
 The unit runs with `ProtectSystem=strict` and `ProtectHome=yes`. Mount NAS shares under `/mnt` or `/srv`, not under `/home`.
 
@@ -127,21 +150,19 @@ The unit runs with `ProtectSystem=strict` and `ProtectHome=yes`. Mount NAS share
 
 If TeddyCloud already runs in Docker, the most elegant setup is teddybridge as a second service in the same compose stack: both share a Docker network, teddybridge talks to TeddyCloud directly by its service name (`TC_URL=http://teddycloud`) – without a reverse proxy in between (no proxy timeouts or 502 during long encodes), and TeddyCloud does not need to be reachable from outside for teddybridge.
 
-Prebuilt image (amd64): `ghcr.io/urza-lab/teddybridge:latest`. No need to clone; the compose template and the env file are enough:
+Prebuilt image (amd64): `ghcr.io/urza-lab/teddybridge:latest`. No need to clone:
+
+1. Copy the `teddybridge` service from [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml) into TeddyCloud's `docker-compose.yml` (variant A), or use it as a separate compose file that joins the TeddyCloud network (variant B). Keep the `teddybridge-config` volume, and add both volumes to the top-level `volumes:` section.
+2. Start it: `docker compose up -d teddybridge`
+3. Get the one-time code: `docker logs teddybridge`
+4. Open `http://<host>:8085/` and follow the [setup](#setup-in-the-browser-since-12). As TeddyCloud address in the same stack, enter `http://teddycloud`. If TeddyCloud has a login, enter its user and password. To show teddybridge inside TeddyCloud via the [plugin](#teddycloud-plugin-optional), enter TeddyCloud's address from your browser's address bar under *More settings*, e.g. `https://teddycloud.example.com`.
+
+**With an env file instead:** download the template, fill it in and add `env_file: ./teddybridge.env` to the service. In the env file, put `TC_AUTH` in single quotes if the password contains `$`.
 
 ```sh
-cd <folder-with-the-teddycloud-compose>
 curl -fsSLo teddybridge.env https://raw.githubusercontent.com/urza-lab/teddybridge/main/deploy/teddybridge.env.example
 chmod 600 teddybridge.env
-# TC_URL=http://teddycloud (service name from the TeddyCloud compose), fill in the other values
-```
-
-If TeddyCloud has a login, put it into `TC_AUTH` (single quotes if the password contains `$`). To show teddybridge inside TeddyCloud via the [plugin](#teddycloud-plugin-optional), set `FRAME_ANCESTORS` to the TeddyCloud address in your browser's address bar, e.g. `https://teddycloud.example.com`.
-
-Then copy the `teddybridge` service from [`deploy/docker-compose.example.yml`](deploy/docker-compose.example.yml) into TeddyCloud's `docker-compose.yml` (variant A), or use it as a separate compose file that joins the TeddyCloud network (variant B), and run:
-
-```sh
-docker compose run --rm -it teddybridge python -m app.pwhash    # create password hash, put it into teddybridge.env
+docker compose run --rm -it teddybridge python -m app.pwhash    # password hash for UI_PASS_HASH
 docker compose up -d teddybridge
 ```
 
@@ -149,7 +170,7 @@ Update: `docker compose pull teddybridge && docker compose up -d teddybridge`. T
 
 Without TeddyCloud in Docker on the same host, it works just as well as a standalone container, e.g. with `network_mode: host` and `TC_URL` pointing to the TeddyCloud address.
 
-The image includes ffmpeg and runs as its own non-root user; the template also sets a read-only file system, `cap_drop: ALL` and `no-new-privileges`. Only `/var/tmp` (volume for downloads – not in RAM, source files can be large) and a small `/tmp` are writable. A NAS share is mounted read-only (`:ro`). Health check: `/login`.
+The image includes ffmpeg and runs as its own non-root user; the template also sets a read-only file system, `cap_drop: ALL` and `no-new-privileges`. Only `/config` (volume for the settings), `/var/tmp` (volume for downloads – not in RAM, source files can be large) and a small `/tmp` are writable. A NAS share is mounted read-only (`:ro`). Health check: `/login`.
 
 Notes: restarting the container discards the queue (same as the systemd service). If a reverse proxy sits in front, put its IP into `TRUSTED_PROXIES` (Docker normally keeps the source IP on published ports).
 
@@ -204,6 +225,7 @@ If the browser does not allow the redirect without a click, an “Open teddybrid
 ```sh
 venv/bin/python tests/test_e2e.py     # end-to-end against mock servers
 venv/bin/python tests/test_audio.py   # MP3 merging and m4b chapters with real audio files (needs ffmpeg)
+venv/bin/python tests/test_setup.py   # setup in the browser: one-time code, connection tests, saving, restart
 ```
 
 Starts mock servers for Audiobookshelf, Navidrome and TeddyCloud (`mock/`) plus a simulated NAS directory and checks login, browsing, transfer, duplicates, splitting, merging (verified byte by byte, or every chapter decoded and measured), m4b chapters (ABS and file source), multi-audiobook TAFs, starting with only one source, both languages, cleanup on errors, path escapes, security headers, and that **no secret appears in the log or UI**. Passwords in tests and mocks are made up.
@@ -246,8 +268,11 @@ teddybridge is built for a **trusted local network**. Whoever can log in may rea
 | `TC_AUTH` (and the TeddyCloud session) is sent to TeddyCloud unencrypted over `http://` | low (LAN) | Reach TeddyCloud via HTTPS if possible |
 | File source: someone who can **write** to the share could in theory swap in a symlink between path check and open (TOCTOU) | low | Mount the share read-only; anyone with write access should be trusted |
 | Sessions in memory only, valid for 30 days | low | A restart logs everyone out |
+| Setup page (only without configuration): anyone with the one-time code from the log can configure the instance | low | Complete the setup right after the first start; the code is only shown in the log |
 
-## Ideas for version 2
+## Ideas for later versions
+
+- **Settings page** to change sources and logins after the first setup, without editing the file.
 
 - **Split long audiobooks into parts of about 60 min** (optional). Helps when switching between boxes (you lose at most the current part) and avoids the known issue that the box no longer saves the position for tracks longer than about 3 h 10 min.
 

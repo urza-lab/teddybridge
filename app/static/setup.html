@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>teddybridge – Einrichtung</title>
+<style>
+:root{--bg:#f6f5f2;--card:#fff;--fg:#1d1d1f;--mut:#6b6b70;--line:#dedcd6;--acc:#d9480f;--err:#c92a2a;--ok:#2b8a3e;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#18181a;--card:#232326;--fg:#ececec;--mut:#9a9aa0;--line:#38383c;--acc:#ff8a4c;--err:#ff8787;--ok:#69db7c;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;padding:24px 16px;font:15px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+main{max-width:640px;margin:0 auto;display:grid;gap:16px}
+h1{font-size:22px;margin:0}
+h2{font-size:17px;margin:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;display:grid;gap:12px}
+label{display:grid;gap:4px;color:var(--mut);font-size:14px}
+label.check{display:flex;gap:8px;align-items:center;color:var(--fg);font-size:15px}
+input,select,button{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:9px 10px;min-width:0}
+input[type=checkbox]{width:18px;height:18px;padding:0}
+input:focus,select:focus{outline:2px solid var(--acc);outline-offset:-1px}
+input:disabled,select:disabled{opacity:.6}
+button{cursor:pointer}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+button:disabled{opacity:.5;cursor:default}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:520px){.row{grid-template-columns:1fr}}
+.hint{color:var(--mut);font-size:13px;margin:0}
+.res{font-size:14px;margin:0}
+.res.ok{color:var(--ok)}
+.res.bad,.err{color:var(--err)}
+.sub{display:grid;gap:12px;padding-left:26px}
+.actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+details summary{cursor:pointer;font-weight:600}
+code{font-size:13px}
+.banner{border-color:var(--err)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <h1>teddybridge einrichten</h1>
+
+  <form class="card" id="unlock">
+    <p>Zum Schutz brauchst du den Einmal-Code aus dem Log von teddybridge, z. B. mit <code>docker logs teddybridge</code>.</p>
+    <label>Einmal-Code<input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCD-EFGH-JKLM" required autofocus></label>
+    <p class="err" id="codeErr" hidden></p>
+    <div class="actions"><button class="primary" type="submit">Weiter</button></div>
+  </form>
+
+  <form id="wizard" hidden>
+    <div class="card banner" id="notWritable" hidden>
+      <p class="err" id="notWritableText"></p>
+    </div>
+
+    <section class="card">
+      <h2>1. TeddyCloud</h2>
+      <label>Adresse von TeddyCloud<input id="TC_URL" placeholder="http://teddycloud" required></label>
+      <p class="hint">Im selben Docker-Stack: <code>http://teddycloud</code> (Dienstname). Sonst die Adresse, unter der teddybridge TeddyCloud erreicht.</p>
+      <div class="row">
+        <label>Benutzer (falls TeddyCloud eine Anmeldung hat)<input id="tcUser" autocomplete="off"></label>
+        <label>Passwort<input id="tcPass" type="password" autocomplete="new-password"></label>
+      </div>
+      <div class="actions"><button type="button" data-test="tc">Verbindung testen</button><p class="res" id="res-tc"></p></div>
+    </section>
+
+    <section class="card">
+      <h2>2. Quellen</h2>
+      <p class="hint">Mindestens eine. teddybridge liest dort nur, es schreibt nie.</p>
+      <label class="check"><input type="checkbox" id="useAbs"> Audiobookshelf</label>
+      <div class="sub" id="sub-abs" hidden>
+        <label>Adresse<input id="ABS_URL" placeholder="http://audiobookshelf:13378"></label>
+        <label>API-Token (eigener Benutzer mit Lesen + Herunterladen)<input id="ABS_TOKEN" type="password" autocomplete="off"></label>
+        <div class="actions"><button type="button" data-test="abs">Verbindung testen</button><p class="res" id="res-abs"></p></div>
+      </div>
+      <label class="check"><input type="checkbox" id="useNd"> Navidrome</label>
+      <div class="sub" id="sub-nd" hidden>
+        <label>Adresse<input id="ND_URL" placeholder="http://navidrome:4533"></label>
+        <div class="row">
+          <label>Benutzer (ohne Admin-Rechte)<input id="ND_USER" autocomplete="off"></label>
+          <label>Passwort<input id="ND_PASS" type="password" autocomplete="new-password"></label>
+        </div>
+        <div class="actions"><button type="button" data-test="nd">Verbindung testen</button><p class="res" id="res-nd"></p></div>
+      </div>
+      <label class="check"><input type="checkbox" id="useFs"> Ordner (z. B. NAS)</label>
+      <div class="sub" id="sub-fs" hidden>
+        <label>Ordner als Name=/pfad, mehrere mit ;<input id="FS_ROOTS" placeholder="Hörspiele=/nas/hoerspiele;Musik=/nas/musik"></label>
+        <p class="hint">Der Pfad gilt im Container; den Ordner dort nur lesend einhängen (<code>:ro</code>).</p>
+        <div class="actions"><button type="button" data-test="fs">Ordner prüfen</button><p class="res" id="res-fs"></p></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>3. Anmeldung an teddybridge</h2>
+      <label class="check"><input type="checkbox" id="noLogin"> Ohne Anmeldung (nur, wenn ausschliesslich vertrauenswürdige Personen den Port erreichen)</label>
+      <div class="sub" id="sub-login">
+        <label>Benutzer<input id="UI_USER" autocomplete="username"></label>
+        <div class="row">
+          <label>Passwort<input id="uiPass" type="password" autocomplete="new-password"></label>
+          <label>Passwort wiederholen<input id="uiPass2" type="password" autocomplete="new-password"></label>
+        </div>
+      </div>
+    </section>
+
+    <details class="card">
+      <summary>4. Weitere Einstellungen (optional)</summary>
+      <label>Sprache
+        <select id="UI_LANG">
+          <option value="">Sprache des Browsers (umschaltbar)</option>
+          <option value="de">Deutsch (fest)</option>
+          <option value="en">English (fest)</option>
+        </select>
+      </label>
+      <label>Basisordner in der TeddyCloud-Bibliothek<input id="TC_BASE" placeholder="teddybridge"></label>
+      <label>Adresse von TeddyCloud im Browser, für die Anzeige in TeddyCloud (Plugin)<input id="FRAME_ANCESTORS" placeholder="https://teddycloud.example.com"></label>
+      <label>IP des Reverse Proxys (falls vorhanden)<input id="TRUSTED_PROXIES" placeholder="192.0.2.10"></label>
+      <label>Discord-Webhook (Meldung je Auftrag)<input id="DISCORD_WEBHOOK" type="password" autocomplete="off"></label>
+    </details>
+
+    <div class="card">
+      <p class="err" id="saveErr" hidden></p>
+      <p class="res ok" id="saveOk" hidden></p>
+      <div class="actions"><button class="primary" type="submit" id="save">Speichern und starten</button><span class="hint" id="where"></span></div>
+    </div>
+  </form>
+</main>
+<script>
+const EN = {
+  'teddybridge einrichten':'Set up teddybridge',
+  'Zum Schutz brauchst du den Einmal-Code aus dem Log von teddybridge, z. B. mit':'For protection you need the one-time code from the teddybridge log, e.g. with',
+  'Einmal-Code':'One-time code','Weiter':'Continue',
+  '1. TeddyCloud':'1. TeddyCloud','Adresse von TeddyCloud':'TeddyCloud address',
+  'Im selben Docker-Stack:':'In the same Docker stack:','(Dienstname). Sonst die Adresse, unter der teddybridge TeddyCloud erreicht.':'(service name). Otherwise the address at which teddybridge reaches TeddyCloud.',
+  'Benutzer (falls TeddyCloud eine Anmeldung hat)':'User (if TeddyCloud requires a login)','Passwort':'Password',
+  'Verbindung testen':'Test connection','Ordner prüfen':'Check folders',
+  '2. Quellen':'2. Sources','Mindestens eine. teddybridge liest dort nur, es schreibt nie.':'At least one. teddybridge only reads there, it never writes.',
+  'Audiobookshelf':'Audiobookshelf','Navidrome':'Navidrome','Ordner (z. B. NAS)':'Folders (e.g. NAS)',
+  'Adresse':'Address','API-Token (eigener Benutzer mit Lesen + Herunterladen)':'API token (dedicated user with read + download)',
+  'Benutzer (ohne Admin-Rechte)':'User (without admin rights)',
+  'Ordner als Name=/pfad, mehrere mit ;':'Folders as Name=/path, several separated by ;',
+  'Der Pfad gilt im Container; den Ordner dort nur lesend einhängen (':'The path is inside the container; mount the folder there read-only (',
+  '3. Anmeldung an teddybridge':'3. Login to teddybridge',
+  'Ohne Anmeldung (nur, wenn ausschliesslich vertrauenswürdige Personen den Port erreichen)':'No login (only if just trusted people can reach the port)',
+  'Benutzer':'User','Passwort wiederholen':'Repeat password',
+  '4. Weitere Einstellungen (optional)':'4. More settings (optional)','Sprache':'Language',
+  'Sprache des Browsers (umschaltbar)':'Browser language (switchable)','Deutsch (fest)':'Deutsch (fixed)','English (fest)':'English (fixed)',
+  'Basisordner in der TeddyCloud-Bibliothek':'Base folder in the TeddyCloud library',
+  'Adresse von TeddyCloud im Browser, für die Anzeige in TeddyCloud (Plugin)':'TeddyCloud address in the browser, to show teddybridge inside TeddyCloud (plugin)',
+  'IP des Reverse Proxys (falls vorhanden)':'IP of the reverse proxy (if any)','Discord-Webhook (Meldung je Auftrag)':'Discord webhook (message per job)',
+  'Speichern und starten':'Save and start',
+  'Hörspiele=/nas/hoerspiele;Musik=/nas/musik':'Audiobooks=/nas/audiobooks;Music=/nas/music',
+  'gespeichert – leer lassen = unverändert':'saved – leave empty to keep',
+  'von der Umgebung gesetzt':'set by the environment',
+  'Wird gespeichert in {path}. Umgebungsvariablen haben Vorrang.':'Saved to {path}. Environment variables take precedence.',
+  '{path} ist nicht beschreibbar. Docker: ein Volume für /config einhängen (siehe README), dann den Container neu starten.':'{path} is not writable. Docker: mount a volume for /config (see README), then restart the container.',
+  'teste …':'testing …','Bitte mindestens eine Quelle wählen.':'Please choose at least one source.',
+  'Gespeichert. teddybridge startet neu …':'Saved. teddybridge is restarting …',
+  'teddybridge läuft – weiter zur Anmeldung …':'teddybridge is running – continuing to the login …',
+  'Neustart dauert ungewöhnlich lange. Bitte die Seite neu laden oder das Log prüfen.':'The restart takes unusually long. Please reload the page or check the log.',
+  'Fehler':'Error','Verbindungsfehler':'Connection error',
+};
+const de = document.documentElement.lang !== 'en';
+const T = (s, v) => { let o = de ? s : (EN[s] || s); for (const k in (v || {})) o = o.replaceAll('{' + k + '}', v[k]); return o; };
+if (!de) {
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n; (n = w.nextNode());) { const k = n.nodeValue.trim(); if (EN[k]) n.nodeValue = n.nodeValue.replace(k, EN[k]); }
+  for (const el of document.querySelectorAll('[placeholder]')) { const k = el.getAttribute('placeholder'); if (EN[k]) el.setAttribute('placeholder', EN[k]); }
+  document.title = 'teddybridge – Setup';
+}
+const $ = id => document.getElementById(id);
+const FIELDS = ['TC_URL','tcUser','tcPass','ABS_URL','ABS_TOKEN','ND_URL','ND_USER','ND_PASS','FS_ROOTS',
+                'UI_USER','uiPass','uiPass2','UI_LANG','TC_BASE','FRAME_ANCESTORS','TRUSTED_PROXIES','DISCORD_WEBHOOK'];
+const KEYFIELDS = {TC_AUTH:['tcUser','tcPass'], UI_PASS_HASH:['uiPass','uiPass2']};
+const SECRETFIELD = {TC_AUTH:'tcPass', ABS_TOKEN:'ABS_TOKEN', ND_PASS:'ND_PASS', UI_PASS_HASH:'uiPass', DISCORD_WEBHOOK:'DISCORD_WEBHOOK'};
+
+async function api(path, body) {
+  const r = await fetch(path, {method: body ? 'POST' : 'GET', headers: body ? {'Content-Type': 'application/json'} : {},
+                                body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin'});
+  let d = {}; try { d = await r.json(); } catch (e) { /* leer */ }
+  return {status: r.status, ok: r.ok, d};
+}
+function collect() {
+  const v = {};
+  for (const id of FIELDS) v[id] = $(id).value;
+  for (const id of ['useAbs','useNd','useFs','noLogin']) v[id] = $(id).checked;
+  return v;
+}
+function toggle() {
+  $('sub-abs').hidden = !$('useAbs').checked; $('sub-nd').hidden = !$('useNd').checked; $('sub-fs').hidden = !$('useFs').checked;
+  $('sub-login').hidden = $('noLogin').checked;
+}
+for (const id of ['useAbs','useNd','useFs','noLogin']) $(id).addEventListener('change', toggle);
+
+async function showWizard() {
+  const {ok, d} = await api('/api/setup/state');
+  if (!ok) return;
+  $('unlock').hidden = true; $('wizard').hidden = false;
+  for (const [k, val] of Object.entries(d.values)) if ($(k)) $(k).value = val || '';
+  $('tcUser').value = d.tcUser || '';
+  $('useAbs').checked = !!d.values.ABS_URL; $('useNd').checked = !!d.values.ND_URL; $('useFs').checked = !!d.values.FS_ROOTS;
+  for (const [k, set] of Object.entries(d.secrets)) if (set && $(SECRETFIELD[k])) $(SECRETFIELD[k]).placeholder = T('gespeichert – leer lassen = unverändert');
+  for (const k of d.fixed) for (const id of (KEYFIELDS[k] || [k])) if ($(id)) { $(id).disabled = true; $(id).title = T('von der Umgebung gesetzt'); $(id).placeholder = T('von der Umgebung gesetzt'); }
+  if (d.fixed.includes('ABS_URL')) $('useAbs').checked = true;
+  if (d.fixed.includes('ND_URL')) $('useNd').checked = true;
+  if (d.fixed.includes('FS_ROOTS')) $('useFs').checked = true;
+  $('where').textContent = T('Wird gespeichert in {path}. Umgebungsvariablen haben Vorrang.', {path: d.path});
+  if (!d.writable) {
+    $('notWritable').hidden = false;
+    $('notWritableText').textContent = T('{path} ist nicht beschreibbar. Docker: ein Volume für /config einhängen (siehe README), dann den Container neu starten.', {path: d.path});
+    $('save').disabled = true;
+  }
+  toggle();
+  $('TC_URL').focus();
+}
+
+$('unlock').onsubmit = async ev => {
+  ev.preventDefault();
+  const {ok, d} = await api('/api/setup/unlock', {code: $('code').value});
+  $('codeErr').hidden = ok; $('codeErr').textContent = d.error || T('Fehler');
+  if (ok) showWizard();
+};
+
+for (const b of document.querySelectorAll('[data-test]')) b.onclick = async () => {
+  const kind = b.dataset.test, out = $('res-' + kind);
+  out.className = 'res'; out.textContent = T('teste …'); b.disabled = true;
+  try {
+    const {d} = await api('/api/setup/test', {kind, values: collect()});
+    out.className = 'res ' + (d.ok ? 'ok' : 'bad'); out.textContent = (d.ok ? '✓ ' : '✗ ') + (d.message || d.error || T('Fehler'));
+  } catch (e) { out.className = 'res bad'; out.textContent = '✗ ' + T('Verbindungsfehler'); }
+  b.disabled = false;
+};
+
+$('wizard').onsubmit = async ev => {
+  ev.preventDefault();
+  $('saveErr').hidden = true;
+  if (!$('useAbs').checked && !$('useNd').checked && !$('useFs').checked) {
+    $('saveErr').hidden = false; $('saveErr').textContent = T('Bitte mindestens eine Quelle wählen.'); return;
+  }
+  $('save').disabled = true;
+  const {ok, d} = await api('/api/setup/save', collect());
+  if (!ok) { $('saveErr').hidden = false; $('saveErr').textContent = d.error || T('Fehler'); $('save').disabled = false; return; }
+  $('saveOk').hidden = false; $('saveOk').textContent = T('Gespeichert. teddybridge startet neu …');
+  const t0 = Date.now();
+  const poll = async () => {
+    try {
+      const r = await fetch('/api/setup/ping', {cache: 'no-store'});
+      let setup = false; try { setup = (await r.json()).setup === true; } catch (e) { /* normale Oberfläche */ }
+      if (!setup) { $('saveOk').textContent = T('teddybridge läuft – weiter zur Anmeldung …'); setTimeout(() => location.href = '/', 800); return; }
+    } catch (e) { /* startet gerade neu */ }
+    if (Date.now() - t0 > 60000) { $('saveOk').textContent = T('Neustart dauert ungewöhnlich lange. Bitte die Seite neu laden oder das Log prüfen.'); return; }
+    setTimeout(poll, 1000);
+  };
+  setTimeout(poll, 1500);
+};
+
+showWizard();  // schon freigeschaltet (Cookie)? Sonst bleibt der Code-Dialog
+</script>
+</body>
+</html>

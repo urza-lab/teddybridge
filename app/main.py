@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from . import config, i18n, pwhash
+from . import __version__, config, i18n, pwhash
 from .i18n import t
 from .clients import Abs, ApiError, Nd, Tc, check_id
 from .fs import Fs
@@ -27,6 +27,7 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger("teddybridge")
 
 CFG = config.load()
+log.info("teddybridge %s", __version__)
 i18n.DEFAULT = CFG.ui_lang or "en"  # Rückfall ohne Cookie/Accept-Language, z. B. für Skripte
 ABS = Abs(CFG) if CFG.abs_enabled else None
 TC = Tc(CFG)
@@ -286,7 +287,7 @@ def index(request: Request):
 @app.get("/api/config")
 def get_config():
     return {"tcBase": CFG.tc_base, "maxFiles": MAX_FILES, "discord": bool(CFG.discord_webhook), "readonly": READONLY, "auth": CFG.ui_auth,
-            "lang": i18n.get(), "langFixed": bool(CFG.ui_lang),
+            "lang": i18n.get(), "langFixed": bool(CFG.ui_lang), "version": __version__,
             "sources": (["abs"] if ABS else []) + (["nd"] if ND else []) + (["fs"] if FS else [])}
 
 

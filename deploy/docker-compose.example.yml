@@ -7,8 +7,11 @@
 # Option B: a separate compose file that joins TeddyCloud's network (uncomment the "networks" section
 # below; look up the network name with `docker network ls`, usually <folder>_default).
 #
-# Configuration: teddybridge.env next to this file (template: deploy/teddybridge.env.example), mode 600.
-# Inside the container at least:  TC_URL=http://teddycloud   (TeddyCloud's service name, internal port 80)
+# Configuration (since 1.2): open http://<host>:8085 after the first start and follow the setup. It asks for a
+# one-time code from the log (docker logs teddybridge) and stores the settings in the volume at /config.
+# Alternatively configure everything in an env file (template: deploy/teddybridge.env.example, mode 600) and
+# uncomment env_file below; set environment variables always take precedence over the setup.
+# TeddyCloud address inside the same stack:  http://teddycloud   (its service name, internal port 80)
 
 services:
   teddybridge:
@@ -16,12 +19,13 @@ services:
     # build: ./teddybridge          # build it yourself instead (folder with the cloned repo)
     container_name: teddybridge
     restart: unless-stopped
-    env_file: ./teddybridge.env
+    # env_file: ./teddybridge.env    # optional instead of / in addition to the setup in the browser
     ports:
       - "8085:8085"                 # only needed if Caddy/the browser is not in the same Docker network
     volumes:
+      - teddybridge-config:/config  # settings from the setup in the browser
       - teddybridge-tmp:/var/tmp    # work folder (downloads), on disk instead of RAM
-      # optional file source (NAS), always read-only; then in the env file: FS_ROOTS=Audiobooks=/nas/audiobooks
+      # optional file source (NAS), always read-only; then in the setup: Audiobooks=/nas/audiobooks
       # - /mnt/nas/audiobooks:/nas/audiobooks:ro
     read_only: true                 # image file system read-only
     tmpfs:
@@ -39,4 +43,5 @@ services:
 #    name: teddycloud_default
 
 volumes:
+  teddybridge-config:
   teddybridge-tmp:
