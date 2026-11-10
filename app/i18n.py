@@ -92,6 +92,18 @@ EN = {
     "{k} von {n} Schnitten in einer Pause": "{k} of {n} cuts placed in a pause",
     "Pausen suchen": "Finding pauses",
     "Kapitel nach Dauer: mindestens 3 min": "chapters by duration: at least 3 min",
+    # --- Tonie zuweisen
+    "TeddyCloud getTagIndex: unerwartete Antwort": "TeddyCloud getTagIndex: unexpected response",
+    "ungültiger TAF-Pfad": "invalid TAF path",
+    "nur TAFs aus dem eigenen Basisordner können zugewiesen werden": "only TAFs from teddybridge's own base folder can be assigned",
+    "TAF nicht gefunden: {path}": "TAF not found: {path}",
+    "Nur-Lese-Modus: Zuweisen ist deaktiviert": "Read-only mode: assigning is disabled",
+    "Pfad zu lang für TeddyCloud ({n} von max. 255 Bytes) – Ordner oder Titel kürzen":
+        "path too long for TeddyCloud ({n} of max. 255 bytes) – shorten folder or title",
+    "Tonie nicht gefunden (nur bestehende Figuren)": "Tonie not found (existing figures only)",
+    "Die Belegung von „{name}“ hat sich inzwischen geändert – bitte neu auswählen":
+        "The assignment of “{name}” has changed in the meantime – please select again",
+    "TeddyCloud hat die Zuweisung nicht übernommen (gelesen: {src})": "TeddyCloud did not accept the assignment (read: {src})",
     "liegt in TeddyCloud schon in {old} Teilen vor, jetzt wären es {n} – nicht gemischt; "
     "zum neu Aufteilen die vorhandenen Teile in TeddyCloud löschen":
         "already in TeddyCloud as {old} parts, now it would be {n} – not mixed; "

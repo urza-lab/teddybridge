@@ -26,7 +26,7 @@ import time
 from email.parser import BytesParser
 from email.policy import HTTP
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 TOKEN = "mocktoken"
 
@@ -277,6 +277,16 @@ class TcHandler(Base):
     web_auth = False
     sessions = set()
     logins = 0
+    # Tonie-Figuren wie /api/getTagIndex (content/<ruid[:8]>/<ruid[8:]>.json in echt)
+    tags = {
+        "e00403500aaa0001": {"type": "tag", "source": "", "live": False, "nocloud": False, "hide": False,
+                             "tonieInfo": {"model": "10000001", "series": "Bobo Siebenschläfer", "episode": "Folge 1",
+                                           "picture": "/img/bobo.png"}},
+        "e00403500aaa0002": {"type": "tag", "source": "lib://fremd/eigenes Hörspiel.taf", "live": True, "nocloud": True,
+                             "hide": False, "tonieInfo": {"model": "", "series": "", "episode": "", "picture": ""}},
+        "0000000000000000": {"type": "system", "source": "", "live": False, "nocloud": False, "hide": False},
+    }
+    tag_sets = []
 
     def _lib(self, q):
         if q.get("special") != "library":
@@ -295,6 +305,8 @@ class TcHandler(Base):
         if self.diag():
             return
         u = urlparse(self.path)
+        if u.path == "/_mock/tags":
+            return self.send(200, {"sets": TcHandler.tag_sets, "tags": TcHandler.tags})
         if u.path == "/_mock/discord":
             data = json.dumps(self.discord).encode()
             self.send_response(200); self.send_header("Content-Length", str(len(data))); self.end_headers()
@@ -303,6 +315,15 @@ class TcHandler(Base):
         if not self._auth_ok():
             return
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        if u.path == "/api/getTagIndex":
+            if "special" in q:  # wäre in echt die Bibliothek statt content
+                return self.send(200, {"tags": []})
+            return self.send(200, {"tags": [{"ruid": r, **v} for r, v in TcHandler.tags.items()]})
+        if u.path == "/img/bobo.png":
+            data = b"\x89PNG\r\n\x1a\nmock"
+            self.send_response(200); self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+            return
         if u.path == "/api/fileIndexV2":
             if not self._lib(q):
                 return
@@ -384,6 +405,22 @@ class TcHandler(Base):
         if not self._auth_ok():
             return
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        if u.path.startswith("/content/json/set/"):
+            ruid = u.path.rsplit("/", 1)[1]
+            body = self.body().decode()
+            if ruid not in TcHandler.tags or "special" in q:
+                return self.send(404, "Not Found")
+            if self.headers.get("Content-Type") != "application/x-www-form-urlencoded" or "+" in body:
+                return self.send(400, "bad form")
+            k, _, v = body.partition("=")
+            v = unquote(v).encode()[:255].decode("utf-8", "ignore")  # wie TeddyCloud: max. 255 Bytes
+            tg = TcHandler.tags[ruid]
+            if k == "source":
+                tg["source"] = v
+            elif k in ("live", "nocloud", "hide"):
+                tg[k] = v == "true"
+            TcHandler.tag_sets.append((ruid, k, v))
+            return self.send(200, "OK")
         if not self._lib(q):
             return
         try:

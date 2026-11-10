@@ -30,6 +30,13 @@ button:disabled{opacity:.5;cursor:default}
 dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--fg);max-width:min(520px,calc(100vw - 32px))}
 dialog::backdrop{background:rgba(0,0,0,.4)}
 dialog ul{padding-left:18px} dialog .btns{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.assign{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px} .assign button{font-size:12px;padding:2px 8px}
+#tonie{width:min(520px,calc(100vw - 32px))} #tonieQ{width:100%;box-sizing:border-box;margin:6px 0}
+#tonieList{list-style:none;padding:0;margin:0;max-height:50vh;overflow:auto}
+#tonieList li{display:flex;gap:10px;align-items:center;padding:6px;border-radius:8px;cursor:pointer}
+#tonieList li:hover,#tonieList li:focus{background:var(--line);outline:none}
+#tonieList img{width:40px;height:40px;object-fit:contain;flex:none} #tonieList .ph{width:40px;height:40px;flex:none;display:grid;place-items:center;font-size:22px}
+#tonieList .src{font-size:12px;opacity:.75;word-break:break-all} #tonieConfirm p{word-break:break-all}
 main{padding:16px}
 .crumb{margin:0 0 12px;color:var(--mut)}
 .crumb a{color:var(--acc);cursor:pointer}
@@ -123,6 +130,23 @@ h3.sub{margin:22px 0 8px;font-size:15px;color:var(--mut)}
   <b>Aufteilen:</b> mehrere TAFs („Teil 1 von n“, gleichmässig).</p>
   <div class="btns"><button id="bigCancel">Abbrechen</button><button id="bigSkip">Diese weglassen</button><button id="bigSplit">Aufteilen</button><button id="bigMerge" class="primary">Zusammenfügen</button></div>
 </dialog>
+<dialog id="tonie">
+  <h3 style="margin-top:0">Tonie zuweisen</h3>
+  <div id="tonieChoose">
+    <p class="src" id="tonieFile"></p>
+    <input id="tonieQ" type="search" placeholder="Figur suchen…" aria-label="Figur suchen">
+    <ul id="tonieList"></ul>
+    <div class="btns"><button id="tonieCancel">Abbrechen</button></div>
+  </div>
+  <div id="tonieConfirm" hidden>
+    <p><b id="tcName"></b></p>
+    <p>spielt bisher: <span id="tcOld"></span></p>
+    <p>neu: <span id="tcNew"></span></p>
+    <p class="src">Die bisherige Belegung wird ersetzt (wie in TeddyCloud: zusätzlich „keine Cloud“ an, „live“ aus). Die Box übernimmt das beim nächsten Auflegen.</p>
+    <div class="btns"><button id="tcBack">Zurück</button><button id="tcOk" class="primary">Zuweisen</button></div>
+  </div>
+  <p id="tonieMsg"></p>
+</dialog>
 <div id="queue" hidden>
   <div class="h"><strong>Warteschlange</strong><span><button id="clr">Erledigte entfernen</button> <button id="hide">×</button></span></div>
   <div id="jobs"></div>
@@ -177,6 +201,12 @@ const EN = {
   'Bitte Unterordner angeben.':'Please enter a subfolder.', 'Bitte einen Namen für die TAF angeben.':'Please enter a name for the TAF.',
   'Nichts zu übertragen.':'Nothing to transfer.',
   '{t} – {n} Dateien → 1 TAF mit {max} Kapiteln oder {p} Teile':'{t} – {n} files → 1 TAF with {max} chapters or {p} parts',
+  'Tonie zuweisen':'Assign to Tonie', 'Figur suchen…':'Search figure…', 'Zurück':'Back', 'Zuweisen':'Assign',
+  'spielt bisher:':'currently plays:', 'neu:':'new:', 'Original-Inhalt (Tonie)':'original content (Tonie)',
+  'Die bisherige Belegung wird ersetzt (wie in TeddyCloud: zusätzlich „keine Cloud“ an, „live“ aus). Die Box übernimmt das beim nächsten Auflegen.':'The current assignment is replaced (as in TeddyCloud: also “no cloud” on, “live” off). The box picks it up the next time the figure is placed.',
+  'Figuren laden …':'Loading figures …', 'Keine Figuren gefunden.':'No figures found.', 'bereits zugewiesen':'already assigned',
+  'Tonie: {t}':'Tonie: {t}', 'Teil {k}':'Part {k}', 'ausgeblendet':'hidden',
+  '„{name}“ spielt jetzt {taf}. Vorher: {old}':'“{name}” now plays {taf}. Before: {old}',
   'Teil {k}/{n}':'part {k}/{n}', 'noch ca. {eta} (fertig ~{at})':'about {eta} left (done ~{at})', 'Achtung: {w}':'Warning: {w}',
 };
 function T(s, v){ let r = LANG==='en' ? (EN[s] ?? s) : s; if(v) for(const k in v) r=r.split('{'+k+'}').join(v[k]); return r; }
@@ -488,6 +518,45 @@ async function send(){
   catch(e){ msg(e.message); markTiles(); }
 }
 
+function partNo(p){ const m=/\[[^\[\]\/]{8}-(\d{1,2})\]\.taf$/i.exec(p); return m?Number(m[1]):0; }
+function srcLabel(s){ return !s ? T('Original-Inhalt (Tonie)') : s.startsWith('lib://') ? s.slice(6) : s; }
+const tn={path:null, list:[], pick:null};
+async function openTonie(path){
+  tn.path=path; tn.pick=null; $('#tonieFile').textContent=path; $('#tonieQ').value=''; $('#tonieMsg').textContent='';
+  $('#tonieChoose').hidden=false; $('#tonieConfirm').hidden=true; $('#tonieList').replaceChildren(el('li',null,T('Figuren laden …')));
+  $('#tonie').showModal();
+  try{ tn.list=(await api('/api/tonies')).tonies; renderTonies(); }
+  catch(e){ $('#tonieList').replaceChildren(); $('#tonieMsg').textContent=e.message; }
+}
+function renderTonies(){
+  const q=$('#tonieQ').value.trim().toLowerCase(), ul=$('#tonieList'); ul.replaceChildren();
+  const want='lib://'+tn.path;
+  const list=tn.list.filter(x=>!q||(x.name+' '+x.ruid+' '+x.source).toLowerCase().includes(q));
+  if(!list.length){ ul.append(el('li',null,T('Keine Figuren gefunden.'))); return; }
+  for(const x of list){
+    const li=el('li'); li.tabIndex=0;
+    if(x.pic){ const im=el('img'); im.loading='lazy'; im.alt=''; im.src='/api/tonies/'+x.ruid+'/picture'; im.onerror=()=>im.replaceWith(el('span','ph','🧸')); li.append(im); }
+    else li.append(el('span','ph','🧸'));
+    const tx=el('div'); tx.append(el('div',null,x.name+(x.hide?' ('+T('ausgeblendet')+')':'')));
+    tx.append(el('div','src',x.source===want?T('bereits zugewiesen'):srcLabel(x.source))); li.append(tx);
+    const go=()=>{ tn.pick=x; $('#tcName').textContent=x.name; $('#tcOld').textContent=srcLabel(x.source); $('#tcNew').textContent=tn.path;
+      $('#tonieChoose').hidden=true; $('#tonieConfirm').hidden=false; $('#tonieMsg').textContent=''; $('#tcOk').focus(); };
+    li.onclick=go; li.onkeydown=e=>{ if(e.key==='Enter') go(); };
+    ul.append(li);
+  }
+}
+async function assignTonie(){
+  const x=tn.pick; if(!x) return; $('#tcOk').disabled=true; $('#tonieMsg').textContent='';
+  try{
+    const r=await api('/api/tonies/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ruid:x.ruid,path:tn.path,expect:x.source})});
+    $('#tonie').close(); msg(T('„{name}“ spielt jetzt {taf}. Vorher: {old}',{name:r.name,taf:tn.path.split('/').pop(),old:srcLabel(r.old)}));
+  }catch(e){ $('#tonieMsg').textContent=e.message; }
+  finally{ $('#tcOk').disabled=false; }
+}
+$('#tonieQ').oninput=renderTonies; $('#tonieCancel').onclick=()=>$('#tonie').close();
+$('#tcBack').onclick=()=>{ $('#tonieChoose').hidden=false; $('#tonieConfirm').hidden=true; renderTonies(); };
+$('#tcOk').onclick=assignTonie;
+
 let pollTimer, lastActive=false;
 async function poll(){
   clearTimeout(pollTimer);
@@ -513,6 +582,12 @@ async function poll(){
       if(j.check) s+=` · ${j.check} ${j.warning?'⚠':'✓'}`;
       if(j.warning) s+=' – '+T('Achtung: {w}',{w:j.warning});
       d.append(el('div','st',s));
+      if((j.state==='done'||j.state==='skipped')&&j.tafs&&j.tafs.length&&!st.readonly){
+        const a=el('div','assign');
+        j.tafs.forEach((p,i)=>{ const b=el('button',null,j.tafs.length>1?T('Tonie: {t}',{t:T('Teil {k}',{k:partNo(p)||i+1})}):T('Tonie zuweisen'));
+          b.onclick=()=>openTonie(p); a.append(b); });
+        d.append(a);
+      }
       if(ACTIVE.includes(j.state)&&j.m){  // ein Balken je Phase: erst Übertragen, dann Umwandeln
         const p=el('div','prog'), b=el('div');
         const frac=j.pct!=null?j.pct/100:(j.state==='encoding'?0:(j.n-1)/j.m);

@@ -1,6 +1,6 @@
 # teddybridge
 
-A web UI to browse audiobooks, radio plays and music from **Audiobookshelf**, **Navidrome** or a **NAS folder** and transfer them with one click as **TAF files** into the library of **[TeddyCloud](https://github.com/toniebox-reverse-engineering/teddycloud)**. You then assign them to a Tonie in TeddyCloud as usual.
+A web UI to browse audiobooks, radio plays and music from **Audiobookshelf**, **Navidrome** or a **NAS folder** and transfer them with one click as **TAF files** into the library of **[TeddyCloud](https://github.com/toniebox-reverse-engineering/teddycloud)**. Afterwards you can assign a TAF to one of your existing Tonie figures right in teddybridge, or in TeddyCloud as usual.
 
 > **Languages:** The user interface is available in **English and German** – it follows the browser language and can be switched in the header, or pinned with `UI_LANG`. Logs are in German.
 
@@ -29,7 +29,8 @@ A web UI to browse audiobooks, radio plays and music from **Audiobookshelf**, **
    5. If TeddyCloud aborts while encoding (e.g. a restart or a host backup), teddybridge waits up to 45 min for TeddyCloud to respond again and checks the TAF: if it is still growing, it waits; if it is complete, the job is done; if it is incomplete, this half-written TAF of its own is removed and re-encoded from the `_src_` files that are still there (at most 2 retries). A half-written TAF from an earlier run is never deleted, but reported on the next transfer.
 4. **Placement:** automatically `TC_BASE/<library>/<series or author>` (Audiobookshelf), `TC_BASE/<music folder>/<album artist>` or `TC_BASE/Playlists` (Navidrome), `TC_BASE/<share>/<folder path>` (file source), or a subfolder of your choice.
 5. **Progress:** The queue in the browser shows a bar, percentage and estimated remaining time with clock time per job. While downloading, the estimate comes from the current speed; while encoding – TeddyCloud reports no progress – from the growing TAF file (TeddyCloud writes steadily about 0.65 MB per minute of audio, about 17× real time). teddybridge refines both values after every finished job.
-6. **Notifications:** optionally via Discord webhook per job – ✅ done (chapters, duration, folder) or ❌ error with reason; for batches of several jobs also a summary (transferred, skipped, errors). Mentions (`@everyone` etc. in titles) are disabled.
+6. **Assign to a Tonie** (since 1.5): see [below](#assign-to-a-tonie).
+7. **Notifications:** optionally via Discord webhook per job – ✅ done (chapters, duration, folder) or ❌ error with reason; for batches of several jobs also a summary (transferred, skipped, errors). Mentions (`@everyone` etc. in titles) are disabled.
 
 The queue lives in memory only. A restart discards pending jobs; this is intended.
 
@@ -72,6 +73,18 @@ A long file without chapter marks (e.g. a 10-hour MP3) normally becomes a TAF wi
 ### Several audiobooks in one TAF
 
 With two or more selected items you can choose “**as one TAF**” with a name of your choice. All items – even from different sources (ABS, Navidrome, file source) – end up in one TAF **in the order you selected them** (the tiles then show 1, 2, 3 …); each audiobook keeps its chapters. If together they exceed 99 chapters, they are merged automatically, but across the boundary between two audiobooks only if there is no other way. Placement: `TC_BASE/Collections` (German UI: `Sammlungen`) or your own subfolder. Marker `k` + hash over the selection: the same selection in the same order is skipped, even under a different name.
+
+### Assign to a Tonie
+
+Finished (or skipped, i.e. already present) jobs in the queue get a button **“Assign to Tonie”** (one per part for split books). It opens the list of figures TeddyCloud knows (picture, name, current assignment, searchable). After picking a figure, a confirmation shows what it plays now and what it will play; only then is it changed.
+
+- Same API calls as TeddyCloud's own web UI: `POST /content/json/set/<ruid>` with `source=lib://<path>`, plus `nocloud=true` (if not set yet) and `live=false` (if it was on). Nothing else is touched (name, model, hide, claimed …).
+- Only **existing** figures (no new tags, no system tags) and only TAFs below teddybridge's own base folder(s) that actually exist.
+- The previous assignment is shown afterwards and logged (`Tonie … assigned: source '…' -> '…'`), so it can be restored in TeddyCloud.
+- If the assignment changed in the meantime (e.g. in TeddyCloud), teddybridge refuses and asks to select again. After saving, it reads the figure back and reports an error if TeddyCloud did not take the new source.
+- TeddyCloud stores at most 255 bytes for the source; longer paths are refused instead of being cut off silently.
+- Figures are read from the default content folder (no per-box overlay). The box picks up the new content the next time the figure is placed.
+- Disabled in read-only mode.
 
 ### File source (NAS)
 
@@ -292,6 +305,7 @@ teddybridge is built for a **trusted local network**. Whoever can log in may rea
 | Sessions in memory only, valid for 30 days | low | A restart logs everyone out |
 | Setup page (only without configuration): anyone with the one-time code from the log can configure the instance | low | Complete the setup right after the first start; the code is only shown in the log |
 | Settings page without login: anyone on the network can request a one-time code, but only someone who can read the log can use it | low | Set a login; then the page needs the session and the current password |
+| Assign to a Tonie changes an existing figure's content (the only change to existing TeddyCloud settings) | low | Only on button press with confirmation, only existing figures and own TAFs, refused if the assignment changed meanwhile; old source shown and logged; set a login if others are on the network |
 
 ## Ideas for later versions
 

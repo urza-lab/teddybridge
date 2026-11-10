@@ -9,6 +9,7 @@ import re
 import threading
 import time
 import urllib.parse
+from urllib.parse import quote
 import uuid
 
 import httpx
@@ -307,8 +308,10 @@ class Tc:
                 f[1].seek(0)
             old = self._session
             try:
+                headers = {**self._cookie(), **(kw.get("headers") or {})}
                 r = self.c.request(method, path, params=params if params is not None else self.LIB,
-                                   timeout=timeout or self.c.timeout, headers=self._cookie(), **kw)
+                                   timeout=timeout or self.c.timeout, headers=headers,
+                                   **{k: v for k, v in kw.items() if k != "headers"})
                 if self._needs_login(r) and not relogged:
                     relogged = True
                     self._login(old)
@@ -470,6 +473,34 @@ class Tc:
         # nicht wiederholen: synchron und lang, und ein zweiter Aufruf scheitert am vorhandenen Ziel
         self._post("/api/fileEncode", "Umwandeln", data=data, retry=False,
                    timeout=httpx.Timeout(30.0, read=max(3600.0, float(wait))))
+
+    # ---------- Tonies (Zuweisen, seit 1.5; ohne special=library, wie die TeddyCloud-Oberfläche)
+
+    def tags(self):
+        """Bekannte Tonie-Figuren: GET /api/getTagIndex -> [{ruid, type, source, live, nocloud, hide, tonieInfo{...}}]"""
+        r = self._request("GET", "/api/getTagIndex", "getTagIndex", params={})
+        if r.status_code in (401, 403):
+            raise ApiError(t("TeddyCloud: Zugriff verweigert (HTTP {status}, TC_AUTH prüfen)", status=r.status_code))
+        if r.status_code != 200:
+            raise _err("TeddyCloud", "getTagIndex", r)
+        try:
+            tags = r.json().get("tags")
+        except ValueError:
+            tags = None
+        if not isinstance(tags, list):
+            raise ApiError(t("TeddyCloud getTagIndex: unerwartete Antwort"))
+        return [x for x in tags if isinstance(x, dict)]
+
+    def set_tag(self, ruid, field, value):
+        """Ein Feld der Tonie-Einstellungen setzen (POST /content/json/set/<ruid>, Formular wie die TC-Oberfläche).
+        Leerzeichen als %20: TeddyCloud dekodiert '+' nicht."""
+        body = f"{field}={quote(str(value), safe='')}".encode()
+        self._post(f"/content/json/set/{ruid}", "Tonie zuweisen", params={}, content=body,
+                   headers={"Content-Type": "application/x-www-form-urlencoded"})
+
+    def raw_get(self, path, what):
+        """GET auf TeddyCloud ohne Bibliotheks-Parameter (z. B. Tonie-Bilder) -> httpx.Response"""
+        return self._request("GET", path, what, params={}, retry=False)
 
     def delete_file(self, rel):
         self._post("/api/fileDelete", "fileDelete", content=rel.encode())

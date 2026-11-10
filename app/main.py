@@ -12,6 +12,8 @@ import threading
 import time
 import urllib.parse
 
+import httpx
+
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
@@ -706,6 +708,119 @@ def submit(req: JobRequest):
         clean_folder(sub)
     bid = QUEUE.submit([i.model_dump() for i in req.items], sub, bundle=bundle, chapter_min=req.chapter_min)
     return {"batch": bid}
+
+
+# ---------- Tonie zuweisen (seit 1.5)
+# Einzige Änderung an bestehenden TeddyCloud-Einstellungen: die Quelle einer vorhandenen Figur, nur auf Knopfdruck
+# mit Bestätigung, nur eigene TAFs. Wie die TeddyCloud-Oberfläche: source=lib://…, dazu nocloud=true und live=false.
+
+RUID = re.compile(r"^[0-9a-f]{16}$")
+CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
+_tonies = {"t": 0.0, "list": [], "pics": {}}
+_pic_cache = {}
+_assign_lock = threading.Lock()
+
+
+def _tonie_list(fresh=False):
+    if fresh or time.time() - _tonies["t"] > 30:
+        out, pics = [], {}
+        for tg in TC.tags():
+            ruid = str(tg.get("ruid") or "").lower()
+            if not RUID.match(ruid) or tg.get("type") not in (None, "tag"):
+                continue
+            info = tg.get("tonieInfo") if isinstance(tg.get("tonieInfo"), dict) else {}
+            name = " – ".join(str(x) for x in (info.get("series"), info.get("episode")) if x) or ruid
+            if info.get("picture"):
+                pics[ruid] = str(info["picture"])
+            out.append({"ruid": ruid, "name": name, "model": str(info.get("model") or ""),
+                        "source": str(tg.get("source") or ""), "live": bool(tg.get("live")),
+                        "nocloud": bool(tg.get("nocloud")), "hide": bool(tg.get("hide")), "pic": ruid in pics})
+        out.sort(key=lambda x: (x["hide"], x["name"].lower()))
+        _tonies.update(t=time.time(), list=out, pics=pics)
+    return _tonies["list"]
+
+
+@app.get("/api/tonies")
+def tonies():
+    return {"tonies": _tonie_list(), "readonly": READONLY}
+
+
+@app.get("/api/tonies/{ruid}/picture")
+def tonie_picture(ruid: str):
+    if not RUID.match(ruid):
+        raise HTTPException(404)
+    if ruid not in _pic_cache:
+        url = _tonies["pics"].get(ruid)
+        if not url:
+            raise HTTPException(404)
+        try:  # Adresse kommt von TeddyCloud (tonies.json), nie aus der Anfrage
+            if url.startswith("/"):
+                r = TC.raw_get(url, "Tonie-Bild")
+            elif url.startswith(("https://", "http://")):
+                r = httpx.get(url, timeout=10, follow_redirects=True)
+            else:
+                raise HTTPException(404)
+        except (ApiError, httpx.HTTPError):
+            raise HTTPException(404) from None
+        ctype = r.headers.get("content-type", "").split(";")[0].strip()
+        if r.status_code != 200 or not ctype.startswith("image/") or ctype == "image/svg+xml" or len(r.content) > 3 << 20:
+            raise HTTPException(404)
+        if len(_pic_cache) > 500:
+            _pic_cache.clear()
+        _pic_cache[ruid] = (ctype, r.content)
+    ctype, data = _pic_cache[ruid]
+    return Response(data, media_type=ctype, headers={"Cache-Control": "private, max-age=86400"})
+
+
+class AssignRequest(BaseModel):
+    ruid: str = Field(pattern=r"^[0-9a-f]{16}$")
+    path: str = Field(min_length=5, max_length=1000)  # TAF relativ zur Bibliothek, z. B. teddybridge/Kinder/x [id].taf
+    expect: str = Field("", max_length=2000)          # Quelle, die der Nutzer beim Bestätigen gesehen hat
+
+
+def _own_taf(path):
+    """Nur eigene, vorhandene TAFs: unter TC_BASE (oder TC_BASE_EXTRA), kein _src_, kein '..'."""
+    parts = path.split("/")
+    if not path.lower().endswith(".taf") or any(p in ("", ".", "..") or p.startswith("_src_") for p in parts) \
+            or CTRL_RE.search(path) or "\\" in path:
+        raise HTTPException(422, t("ungültiger TAF-Pfad"))
+    if not any(path.startswith(b + "/") for b in CFG.tc_scan_bases):
+        raise HTTPException(422, t("nur TAFs aus dem eigenen Basisordner können zugewiesen werden"))
+    parent, name = "/".join(parts[:-1]), parts[-1]
+    if not any(f.get("name") == name and not f.get("isDirectory") for f in TC.list_dir(parent) or []):
+        raise HTTPException(404, t("TAF nicht gefunden: {path}", path=path))
+
+
+@app.post("/api/tonies/assign")
+def tonie_assign(req: AssignRequest):
+    if READONLY:
+        raise HTTPException(403, t("Nur-Lese-Modus: Zuweisen ist deaktiviert"))
+    path = req.path.strip()
+    _own_taf(path)
+    new = "lib://" + path
+    if len(new.encode()) > 255:  # TeddyCloud speichert höchstens 255 Bytes und kürzt sonst stillschweigend
+        raise HTTPException(422, t("Pfad zu lang für TeddyCloud ({n} von max. 255 Bytes) – Ordner oder Titel kürzen",
+                                   n=len(new.encode())))
+    with _assign_lock:
+        cur = next((x for x in _tonie_list(fresh=True) if x["ruid"] == req.ruid), None)
+        if not cur:
+            raise HTTPException(404, t("Tonie nicht gefunden (nur bestehende Figuren)"))
+        if cur["source"] != req.expect:
+            raise HTTPException(409, t("Die Belegung von „{name}“ hat sich inzwischen geändert – bitte neu auswählen",
+                                       name=cur["name"]))
+        if cur["source"] != new:
+            TC.set_tag(req.ruid, "source", new)
+        if not cur["nocloud"]:
+            TC.set_tag(req.ruid, "nocloud", "true")
+        if cur["live"]:
+            TC.set_tag(req.ruid, "live", "false")
+        after = next((x for x in _tonie_list(fresh=True) if x["ruid"] == req.ruid), None)
+        if not after or after["source"] != new:
+            raise ApiError(t("TeddyCloud hat die Zuweisung nicht übernommen (gelesen: {src})",
+                             src=(after or {}).get("source") or "–"))
+    if cur["source"] != new:
+        log.info("Tonie %s (%s) zugewiesen: Quelle %r -> %r", req.ruid, cur["name"], cur["source"] or "", new)
+    return {"ok": True, "name": cur["name"], "old": cur["source"], "new": new}
 
 
 @app.get("/api/jobs")

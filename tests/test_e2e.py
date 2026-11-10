@@ -426,7 +426,61 @@ print("RESULT" + json.dumps(out))
             os.remove(x)
         c.post("/api/jobs/clear")
         c.post("/api/jobs", json={"items": [{"id": C, "split": True}]})
-        check(wait_jobs(c, 1)[0]["state"] == "done" and os.path.exists(p1) and os.path.exists(p2), "Zustand für folgende Tests wiederhergestellt")
+        jr = wait_jobs(c, 1)[0]
+        check(jr["state"] == "done" and os.path.exists(p1) and os.path.exists(p2), "Zustand für folgende Tests wiederhergestellt")
+
+        print("Tonie zuweisen")
+        part1, part2 = f"{BASE}/Kinder/Test/Zu viele Dateien - Teil 1 von 2 [cccc3333-1].taf", f"{BASE}/Kinder/Test/Zu viele Dateien - Teil 2 von 2 [cccc3333-2].taf"
+        check(jr["tafs"] == [part1, part2], f"Auftrag kennt seine TAFs (Teile in Reihenfolge) {jr['tafs']}")
+        c.post("/api/jobs/clear")
+        c.post("/api/jobs", json={"items": [{"id": C, "split": True}]})
+        js = wait_jobs(c, 1)[0]
+        check(js["state"] == "skipped" and js["tafs"] == [part1, part2], "auch übersprungene Aufträge kennen ihre TAFs")
+        c.post("/api/jobs/clear")
+        ts = c.get("/api/tonies").json()["tonies"]
+        check([x["ruid"] for x in ts] == ["e00403500aaa0001", "e00403500aaa0002"] and ts[0]["name"] == "Bobo Siebenschläfer – Folge 1"
+              and ts[1]["name"] == "e00403500aaa0002", f"Figuren gelistet, System-Tag weggelassen, Name aus tonieInfo sonst ID {ts}")
+        r = c.get("/api/tonies/e00403500aaa0001/picture")
+        check(r.status_code == 200 and r.headers["content-type"] == "image/png", "Bild über das Backend (von TeddyCloud)")
+        check(c.get("/api/tonies/e00403500aaa0002/picture").status_code == 404, "ohne Bild: 404")
+        bobo, fremd = "e00403500aaa0001", "e00403500aaa0002"
+        umlaut = f"{BASE}/Kinder/Test/Grüße & Co [aaaa9999].taf"
+        open(os.path.join(lib, umlaut), "w").write("FAKE-TAF\n")
+        os.makedirs(os.path.join(lib, BASE, "y" * 100, "z" * 100))
+        lang = f"{BASE}/{'y' * 100}/{'z' * 100}/{'w' * 50}.taf"
+        open(os.path.join(lib, lang), "w").write("FAKE-TAF\n")
+        open(os.path.join(lib, "fremd.taf"), "w").write("FAKE-TAF\n")
+        for body, code, what in (
+                ({"ruid": bobo, "path": part1, "expect": "lib://anders"}, 409, "Belegung inzwischen geändert"),
+                ({"ruid": bobo, "path": "fremd.taf", "expect": ""}, 422, "TAF ausserhalb des Basisordners"),
+                ({"ruid": bobo, "path": f"{BASE}/../fremd.taf", "expect": ""}, 422, "'..' im Pfad"),
+                ({"ruid": bobo, "path": f"{BASE}/Kinder/_src_x/a.taf", "expect": ""}, 422, "_src_-Ordner"),
+                ({"ruid": bobo, "path": f"{BASE}/Kinder/fehlt.taf", "expect": ""}, 404, "TAF existiert nicht"),
+                ({"ruid": bobo, "path": f"{BASE}/Kinder/Test", "expect": ""}, 422, "keine .taf"),
+                ({"ruid": "e00403500aaa0009", "path": part1, "expect": ""}, 404, "unbekannte Figur"),
+                ({"ruid": "0000000000000000", "path": part1, "expect": ""}, 404, "System-Tag"),
+                ({"ruid": "E00403500AAA0001", "path": part1, "expect": ""}, 422, "ungültige ID"),
+                ({"ruid": bobo, "path": lang, "expect": ""}, 422, "Pfad > 255 Bytes")):
+            r = c.post("/api/tonies/assign", json=body)
+            check(r.status_code == code, f"abgelehnt: {what} ({r.status_code})")
+        mt = httpx.get(f"http://127.0.0.1:{TC_P}/_mock/tags").json()
+        check(mt["sets"] == [], "nach Ablehnungen nichts in TeddyCloud geändert")
+        r = c.post("/api/tonies/assign", json={"ruid": bobo, "path": part1, "expect": ""})
+        mt = httpx.get(f"http://127.0.0.1:{TC_P}/_mock/tags").json()
+        check(r.status_code == 200 and r.json()["old"] == "" and r.json()["new"] == "lib://" + part1, f"Bobo zugewiesen {r.text[:200]}")
+        check(mt["tags"][bobo]["source"] == "lib://" + part1 and mt["tags"][bobo]["nocloud"] is True and mt["tags"][bobo]["live"] is False,
+              "Quelle (mit Leerzeichen) gesetzt, keine Cloud an")
+        check([x[1] for x in mt["sets"]] == ["source", "nocloud"], f"nur source + nocloud geändert {mt['sets']}")
+        r = c.post("/api/tonies/assign", json={"ruid": fremd, "path": umlaut, "expect": "lib://fremd/eigenes Hörspiel.taf"})
+        mt = httpx.get(f"http://127.0.0.1:{TC_P}/_mock/tags").json()
+        check(r.status_code == 200 and mt["tags"][fremd]["source"] == "lib://" + umlaut and mt["tags"][fremd]["live"] is False,
+              "Umlaute und & richtig kodiert, live aus")
+        check([x[1] for x in mt["sets"][2:]] == ["source", "live"] and r.json()["old"] == "lib://fremd/eigenes Hörspiel.taf",
+              "nocloud schon an: nicht erneut gesetzt; alte Quelle zurückgemeldet")
+        ts = {x["ruid"]: x for x in c.get("/api/tonies").json()["tonies"]}
+        check(ts[bobo]["source"] == "lib://" + part1, "Liste zeigt neue Belegung")
+        os.remove(os.path.join(lib, umlaut)), os.remove(os.path.join(lib, lang)), os.remove(os.path.join(lib, "fremd.taf"))
+        shutil.rmtree(os.path.join(lib, BASE, "y" * 100))
 
         print("Eigener Unterordner und Duplikate")
         c.post("/api/jobs/clear")
@@ -882,7 +936,10 @@ for path in ("/", "/login", "/api/config"):
         check(dels and all("ENCODE-CRASH" in e.get("rel", "") and e["rel"].endswith(".taf") for e in own_partial),
               f"TC: nur _src_ gelöscht, ausser eigenen halben TAFs nach Abbruch ({len(dels)} Löschaufrufe, {len(own_partial)} halbe TAFs)")
         check(all(e["status"] != 401 for e in tclog), "TC: Basic Auth mitgeschickt")
-        check(all("special=library" in e["path"] for e in tclog if e["path"].startswith("/api/")), "TC: immer special=library")
+        check(all("special=library" in e["path"] for e in tclog if e["path"].startswith("/api/") and not e["path"].startswith("/api/getTagIndex")),
+              "TC: immer special=library (ausser Tonie-Liste)")
+        check(all("special=" not in e["path"] for e in tclog if e["path"].startswith(("/api/getTagIndex", "/content/json/set/"))),
+              "TC: Tonie-Aufrufe ohne special (sonst falscher Ordner)")
 
         print("TeddyCloud-eigene Anmeldung (web_auth)")
         def drop_taf(mark):

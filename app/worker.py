@@ -83,6 +83,21 @@ def markers(names):
 
 def scan_tree(tc, base, max_depth=6):
     """Alle TAF-Dateinamen unterhalb von base (ohne _src_-Ordner)."""
+    return [n for _, n in scan_paths(tc, base, max_depth)]
+
+
+def own_tafs(paths, short):
+    """Pfade („ordner/name.taf“) der TAFs mit diesem Kennzeichen, ganze zuerst, Teile nach Nummer."""
+    hits = []
+    for d, n in paths:
+        m = MARKER.search(n)
+        if m and m.group(1) == short:
+            hits.append((int(m.group(2) or 0), f"{d}/{n}"))
+    return [p for _, p in sorted(hits)]
+
+
+def scan_paths(tc, base, max_depth=6):
+    """Alle TAFs unterhalb von base (ohne _src_-Ordner) als [(ordner, name)]."""
     names, todo = [], [(base, 0)]
     while todo:
         rel, depth = todo.pop()
@@ -95,7 +110,7 @@ def scan_tree(tc, base, max_depth=6):
                 if depth < max_depth and not n.startswith("_src_"):
                     todo.append((f"{rel}/{n}", depth + 1))
             elif n.lower().endswith(".taf"):
-                names.append(n)
+                names.append((rel, n))
     return names
 
 
@@ -415,7 +430,7 @@ class Queue:
                     "parts_min": int(it.get("parts_min") or 0), "chapter_min": int(chapter_min or 0),
                     "folder": f"{self.cfg.tc_base}/{sub}" if sub else None,
                     "state": "waiting", "n": 0, "m": 0, "part": 0, "parts": 0, "error": None,
-                    "taf": None, "check": None, "warning": None, "note": None,
+                    "taf": None, "tafs": [], "check": None, "warning": None, "note": None,
                     "secs": None, "eta": None, "pct": None, "created": time.time(), "finished": None,
                     "lang": i18n.get(),  # Sprache der Meldungen/Ordnernamen: die der Anfrage beim Einreihen
                 }
@@ -575,7 +590,8 @@ class Queue:
         # Duplikatprüfung im ganzen Basisordner (auch wenn sich Serie/Ordner seither geändert hat)
         # auch in TC_BASE_EXTRA (z. B. alter Basisordner): dort nur suchen, nie schreiben
         bases = getattr(self.cfg, "tc_scan_bases", None) or (base,)
-        names = [n for b in bases for n in scan_tree(self.tc, b)]
+        paths = [x for b in bases for x in scan_paths(self.tc, b)]
+        names = [n for _, n in paths]
         have = markers(names)
         if short in have:
             for d, n in [hit for b in bases for hit in find_marker(self.tc, b, short)]:
@@ -584,7 +600,7 @@ class Queue:
                     raise ApiError(t("in TeddyCloud liegt eine unvollständige TAF „{name}“ in {folder} (früher abgebrochen) – "
                                      "bitte dort löschen und das Hörbuch neu übertragen", name=n, folder=d))
             log.info("Auftrag %s: [%s] schon vorhanden", jid, short)
-            self._set(jid, state="skipped", finished=time.time(),
+            self._set(jid, state="skipped", finished=time.time(), tafs=own_tafs(paths, short),
                       note=t("schon als eine TAF vorhanden (zum Aufteilen erst in TeddyCloud löschen)") if by_time else None)
             return
 
@@ -618,12 +634,12 @@ class Queue:
             if by_time:
                 split_note = t("in {n} Teile à ca. {m} min aufgeteilt", n=n, m=round(audio_secs(pieces) / n / 60))
             if not plan:
-                self._set(jid, state="skipped", finished=time.time(), note=split_note)
+                self._set(jid, state="skipped", finished=time.time(), note=split_note, tafs=own_tafs(paths, short))
                 return
         else:
             if any(h.startswith(short + "-") for h in have):
                 log.info("Auftrag %s: [%s] als Teile schon vorhanden", jid, short)
-                self._set(jid, state="skipped", finished=time.time())
+                self._set(jid, state="skipped", finished=time.time(), tafs=own_tafs(paths, short))
                 return
             units = merge_units(pieces) if len(pieces) > MAX_FILES else [[p] for p in pieces]
             plan = [(f"{clean} [{short}].taf", units)]
@@ -730,7 +746,8 @@ class Queue:
                 except ApiError as e:
                     log.warning("Aufräumen von _src_%s fehlgeschlagen: %s", short, e)
         # erst nach dem Aufräumen „fertig“ melden
-        self._set(jid, state="done", finished=time.time(), eta=0, pct=100)
+        self._set(jid, state="done", finished=time.time(), eta=0, pct=100,
+                  tafs=own_tafs(paths + [(folder, taf) for taf, _ in plan], short))
         log.info("Auftrag %s: fertig [%s]", jid, short)
 
     def _watch_encode(self, jid, folder, taf, secs, later, stop):
