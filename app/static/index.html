@@ -63,7 +63,7 @@ main{padding:16px}
 #queue .job.done .st{color:var(--ok)} #queue .job.error .st{color:var(--err)}
 .prog{height:4px;background:var(--line);border-radius:2px;margin-top:4px;overflow:hidden}
 .prog div{height:100%;background:var(--acc)}
-#msg{color:var(--err)}
+#msg{color:var(--err)} #msg.ok{color:var(--ok)}
 .tile .tr{align-self:flex-start;margin-top:4px;padding:3px 8px;font-size:13px}
 .songs{list-style:none;margin:0;padding:0;max-width:760px}
 .songs li{display:flex;gap:10px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--line)}
@@ -236,7 +236,7 @@ async function api(path, opt){
 }
 function el(tag, cls, text){const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e;}
 function dur(s){s=Math.round(s||0); const h=Math.floor(s/3600), m=Math.round((s%3600)/60); return h?`${h} h ${m} min`:`${m} min`;}
-function msg(t){$('#msg').textContent=t||'';}
+function msg(t, ok){$('#msg').textContent=t||''; $('#msg').classList.toggle('ok',!!ok);}
 const B = () => st.src==='nd' ? '/api/nd' : st.src==='fs' ? '/api/fs' : '/api';
 const AUTO = {abs:'Bibliothek/Serie bzw. Autor', nd:'Musikordner/Album-Künstler', fs:'Freigabe/Ordnerpfad'};
 function store(k,v){try{localStorage.setItem(k,v);}catch(e){}}
@@ -549,7 +549,7 @@ async function assignTonie(){
   const x=tn.pick; if(!x) return; $('#tcOk').disabled=true; $('#tonieMsg').textContent='';
   try{
     const r=await api('/api/tonies/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ruid:x.ruid,path:tn.path,expect:x.source})});
-    $('#tonie').close(); msg(T('„{name}“ spielt jetzt {taf}. Vorher: {old}',{name:r.name,taf:tn.path.split('/').pop(),old:srcLabel(r.old)}));
+    $('#tonie').close(); msg(T('„{name}“ spielt jetzt {taf}. Vorher: {old}',{name:r.name,taf:tn.path.split('/').pop(),old:srcLabel(r.old)}), true);
   }catch(e){ $('#tonieMsg').textContent=e.message; }
   finally{ $('#tcOk').disabled=false; }
 }
