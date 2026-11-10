@@ -104,6 +104,13 @@ EN = {
     "Die Belegung von „{name}“ hat sich inzwischen geändert – bitte neu auswählen":
         "The assignment of “{name}” has changed in the meantime – please select again",
     "TeddyCloud hat die Zuweisung nicht übernommen (gelesen: {src})": "TeddyCloud did not accept the assignment (read: {src})",
+    "Auftrag nicht gefunden": "job not found",
+    "Auftrag ist schon abgeschlossen – bitte direkt zuweisen": "job already finished – please assign directly",
+    "„{name}“ ist schon für „{title}“ vorgemerkt": "“{name}” is already reserved for “{title}”",
+    "keine TAF gefunden": "no TAF found",
+    "Tonie „{name}“ zugewiesen (vorher: {old})": "Tonie “{name}” assigned (before: {old})",
+    "Original-Inhalt": "original content",
+    "Tonie „{name}“ nicht zugewiesen: {err}": "Tonie “{name}” not assigned: {err}",
     "liegt in TeddyCloud schon in {old} Teilen vor, jetzt wären es {n} – nicht gemischt; "
     "zum neu Aufteilen die vorhandenen Teile in TeddyCloud löschen":
         "already in TeddyCloud as {old} parts, now it would be {n} – not mixed; "

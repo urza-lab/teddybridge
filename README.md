@@ -86,6 +86,8 @@ Finished (or skipped, i.e. already present) jobs in the queue get a button **“
 - Figures are read from the default content folder (no per-box overlay). The box picks up the new content the next time the figure is placed.
 - Disabled in read-only mode.
 
+**Reserve while the job is still running** (since 1.5.1): waiting or running jobs have a button “**Reserve Tonie**”. Pick a figure and confirm as above; the job then shows “reserved: …” (change or remove with ×). As soon as the job is finished – or skipped because the TAF already exists – teddybridge assigns the first TAF (part 1 if split) automatically, with the same checks: if the figure's assignment changed in the meantime (e.g. in TeddyCloud), it is **not** overwritten and the queue shows why. The result also appears in the Discord message. A figure can be reserved for only one open job at a time; reservations live in memory like the queue.
+
 ### File source (NAS)
 
 `FS_ROOTS` points to folders that are already mounted. A folder with audio files is one audiobook/album; subfolders like `CD1`, `Disc 2` or `Teil 3` belong to it. Title = folder name, cover = `cover.jpg`/`folder.jpg`/… Paths outside the share (also via symlink) are rejected. teddybridge never writes to the share; still, mount it **read-only**.

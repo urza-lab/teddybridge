@@ -30,7 +30,8 @@ button:disabled{opacity:.5;cursor:default}
 dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--fg);max-width:min(520px,calc(100vw - 32px))}
 dialog::backdrop{background:rgba(0,0,0,.4)}
 dialog ul{padding-left:18px} dialog .btns{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
-.assign{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px} .assign button{font-size:12px;padding:2px 8px}
+.assign{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;align-items:center} .assign button{font-size:12px;padding:2px 8px}
+.tres{font-size:12px;margin-top:2px} .tres.ok{color:var(--ok)} .tres.err{color:var(--err)}
 #tonie{width:min(520px,calc(100vw - 32px))} #tonieQ{width:100%;box-sizing:border-box;margin:6px 0}
 #tonieList{list-style:none;padding:0;margin:0;max-height:50vh;overflow:auto}
 #tonieList li{display:flex;gap:10px;align-items:center;padding:6px;border-radius:8px;cursor:pointer}
@@ -207,6 +208,10 @@ const EN = {
   'Figuren laden …':'Loading figures …', 'Keine Figuren gefunden.':'No figures found.', 'bereits zugewiesen':'already assigned',
   'Tonie: {t}':'Tonie: {t}', 'Teil {k}':'Part {k}', 'ausgeblendet':'hidden',
   '„{name}“ spielt jetzt {taf}. Vorher: {old}':'“{name}” now plays {taf}. Before: {old}',
+  'vorgemerkt: {name}':'reserved: {name}', 'ändern':'change', 'Vormerkung entfernen':'Remove reservation',
+  'Tonie vormerken':'Reserve Tonie', 'Wird automatisch zugewiesen, sobald der Auftrag fertig ist':'Assigned automatically as soon as the job is finished',
+  '„{title}“, sobald fertig (bei Teilen: Teil 1)':'“{title}” once finished (if split: part 1)',
+  '„{name}“ vorgemerkt für „{title}“':'“{name}” reserved for “{title}”',
   'Teil {k}/{n}':'part {k}/{n}', 'noch ca. {eta} (fertig ~{at})':'about {eta} left (done ~{at})', 'Achtung: {w}':'Warning: {w}',
 };
 function T(s, v){ let r = LANG==='en' ? (EN[s] ?? s) : s; if(v) for(const k in v) r=r.split('{'+k+'}').join(v[k]); return r; }
@@ -520,9 +525,10 @@ async function send(){
 
 function partNo(p){ const m=/\[[^\[\]\/]{8}-(\d{1,2})\]\.taf$/i.exec(p); return m?Number(m[1]):0; }
 function srcLabel(s){ return !s ? T('Original-Inhalt (Tonie)') : s.startsWith('lib://') ? s.slice(6) : s; }
-const tn={path:null, list:[], pick:null};
-async function openTonie(path){
-  tn.path=path; tn.pick=null; $('#tonieFile').textContent=path; $('#tonieQ').value=''; $('#tonieMsg').textContent='';
+const tn={path:null, job:null, list:[], pick:null};
+function tnTarget(){ return tn.job ? T('„{title}“, sobald fertig (bei Teilen: Teil 1)',{title:tn.job.title}) : tn.path; }
+async function openTonie(path, job){
+  tn.path=path; tn.job=job||null; tn.pick=null; $('#tonieFile').textContent=tnTarget(); $('#tonieQ').value=''; $('#tonieMsg').textContent='';
   $('#tonieChoose').hidden=false; $('#tonieConfirm').hidden=true; $('#tonieList').replaceChildren(el('li',null,T('Figuren laden …')));
   $('#tonie').showModal();
   try{ tn.list=(await api('/api/tonies')).tonies; renderTonies(); }
@@ -530,7 +536,7 @@ async function openTonie(path){
 }
 function renderTonies(){
   const q=$('#tonieQ').value.trim().toLowerCase(), ul=$('#tonieList'); ul.replaceChildren();
-  const want='lib://'+tn.path;
+  const want=tn.path?'lib://'+tn.path:null;
   const list=tn.list.filter(x=>!q||(x.name+' '+x.ruid+' '+x.source).toLowerCase().includes(q));
   if(!list.length){ ul.append(el('li',null,T('Keine Figuren gefunden.'))); return; }
   for(const x of list){
@@ -539,7 +545,7 @@ function renderTonies(){
     else li.append(el('span','ph','🧸'));
     const tx=el('div'); tx.append(el('div',null,x.name+(x.hide?' ('+T('ausgeblendet')+')':'')));
     tx.append(el('div','src',x.source===want?T('bereits zugewiesen'):srcLabel(x.source))); li.append(tx);
-    const go=()=>{ tn.pick=x; $('#tcName').textContent=x.name; $('#tcOld').textContent=srcLabel(x.source); $('#tcNew').textContent=tn.path;
+    const go=()=>{ tn.pick=x; $('#tcName').textContent=x.name; $('#tcOld').textContent=srcLabel(x.source); $('#tcNew').textContent=tnTarget();
       $('#tonieChoose').hidden=true; $('#tonieConfirm').hidden=false; $('#tonieMsg').textContent=''; $('#tcOk').focus(); };
     li.onclick=go; li.onkeydown=e=>{ if(e.key==='Enter') go(); };
     ul.append(li);
@@ -548,6 +554,10 @@ function renderTonies(){
 async function assignTonie(){
   const x=tn.pick; if(!x) return; $('#tcOk').disabled=true; $('#tonieMsg').textContent='';
   try{
+    if(tn.job){
+      await api('/api/jobs/'+tn.job.id+'/tonie',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ruid:x.ruid,expect:x.source})});
+      $('#tonie').close(); msg(T('„{name}“ vorgemerkt für „{title}“',{name:x.name,title:tn.job.title}), true); poll(); return;
+    }
     const r=await api('/api/tonies/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ruid:x.ruid,path:tn.path,expect:x.source})});
     $('#tonie').close(); msg(T('„{name}“ spielt jetzt {taf}. Vorher: {old}',{name:r.name,taf:tn.path.split('/').pop(),old:srcLabel(r.old)}), true);
   }catch(e){ $('#tonieMsg').textContent=e.message; }
@@ -582,6 +592,18 @@ async function poll(){
       if(j.check) s+=` · ${j.check} ${j.warning?'⚠':'✓'}`;
       if(j.warning) s+=' – '+T('Achtung: {w}',{w:j.warning});
       d.append(el('div','st',s));
+      if(j.tonie_result) d.append(el('div','tres '+(j.tonie_ok?'ok':'err'),(j.tonie_ok?'🧸 ':'⚠ ')+j.tonie_result));
+      if(!['done','skipped','error'].includes(j.state)&&!st.readonly){
+        const a=el('div','assign');
+        if(j.tonie){
+          a.append(el('span','tres','🧸 '+T('vorgemerkt: {name}',{name:j.tonie.name})));
+          const ch=el('button',null,T('ändern')); ch.onclick=()=>openTonie(null,j); a.append(ch);
+          const rm=el('button',null,'×'); rm.title=T('Vormerkung entfernen'); rm.setAttribute('aria-label',T('Vormerkung entfernen'));
+          rm.onclick=async()=>{ try{ await api('/api/jobs/'+j.id+'/tonie',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ruid:null})}); poll(); }catch(e){ msg(e.message); } };
+          a.append(rm);
+        } else { const b=el('button',null,T('Tonie vormerken')); b.title=T('Wird automatisch zugewiesen, sobald der Auftrag fertig ist'); b.onclick=()=>openTonie(null,j); a.append(b); }
+        d.append(a);
+      }
       if((j.state==='done'||j.state==='skipped')&&j.tafs&&j.tafs.length&&!st.readonly){
         const a=el('div','assign');
         j.tafs.forEach((p,i)=>{ const b=el('button',null,j.tafs.length>1?T('Tonie: {t}',{t:T('Teil {k}',{k:partNo(p)||i+1})}):T('Tonie zuweisen'));

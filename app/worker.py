@@ -396,6 +396,7 @@ class Queue:
         self.lock = threading.Lock()
         self.ids = itertools.count(1)
         self.changed = time.time()  # für den Status-Cache
+        self.on_final = None  # main setzt das: vorgemerkten Tonie zuweisen (jid, job)
         self.speed, self.bps = ENC_SPEED, TAF_BPS
         try:  # eigene Verbindung, weil der Worker-Thread während des Umwandelns blockiert wartet
             self.tc_poll = type(tc)(cfg)
@@ -430,7 +431,7 @@ class Queue:
                     "parts_min": int(it.get("parts_min") or 0), "chapter_min": int(chapter_min or 0),
                     "folder": f"{self.cfg.tc_base}/{sub}" if sub else None,
                     "state": "waiting", "n": 0, "m": 0, "part": 0, "parts": 0, "error": None,
-                    "taf": None, "tafs": [], "check": None, "warning": None, "note": None,
+                    "taf": None, "tafs": [], "tonie": None, "tonie_result": None, "tonie_ok": None, "check": None, "warning": None, "note": None,
                     "secs": None, "eta": None, "pct": None, "created": time.time(), "finished": None,
                     "lang": i18n.get(),  # Sprache der Meldungen/Ordnernamen: die der Anfrage beim Einreihen
                 }
@@ -444,6 +445,26 @@ class Queue:
     def snapshot(self):
         with self.lock:
             return [dict(j) for j in sorted(self.jobs.values(), key=lambda j: j["id"])]
+
+    def set_tonie(self, jid, tonie):
+        """Tonie für einen noch laufenden/wartenden Auftrag vormerken (None = Vormerkung entfernen).
+        -> (ok, Grund): nicht möglich, wenn der Auftrag schon abgeschlossen ist oder die Figur bei einem
+        anderen offenen Auftrag vorgemerkt ist."""
+        with self.lock:
+            job = self.jobs.get(jid)
+            if not job:
+                return False, "missing"
+            if job["state"] in FINAL:
+                return False, "final"
+            if tonie:
+                other = next((j for j in self.jobs.values() if j["id"] != jid and j["state"] not in FINAL
+                              and (j.get("tonie") or {}).get("ruid") == tonie["ruid"]), None)
+                if other:
+                    return False, other["title"]
+            job["tonie"] = tonie
+            job["tonie_result"] = None
+        self.changed = time.time()
+        return True, None
 
     def clear_finished(self):
         with self.lock:
@@ -481,6 +502,14 @@ class Queue:
             log.exception("Unerwarteter Fehler bei Auftrag %s", jid)
             self._fail(jid, t("interner Fehler ({name})", name=type(e).__name__))
         self.changed = time.time()
+        try:  # vorgemerkter Tonie (seit 1.5.1): erst nach dem Abschluss zuweisen
+            with self.lock:
+                final = dict(self.jobs[jid])
+            if final.get("tonie") and final["state"] in ("done", "skipped") and self.on_final:
+                self.on_final(jid, final)
+                self.changed = time.time()
+        except Exception:
+            log.exception("Fehler beim Zuweisen des vorgemerkten Tonies")
         try:
             with self.lock:
                 final = dict(self.jobs[jid])
@@ -889,6 +918,8 @@ class Queue:
             if job.get("warning"):
                 text += f"\n⚠ {job['warning']}"
             text += f"\n📁 {job.get('folder') or ''}"
+            if job.get("tonie_result"):
+                text += f"\n{'🧸' if job.get('tonie_ok') else '⚠'} {job['tonie_result']}"
         elif job["state"] == "error":
             text = t("❌ teddybridge: **{name}** fehlgeschlagen: {err}", name=job.get("title") or name, err=job.get("error") or "?")
         else:

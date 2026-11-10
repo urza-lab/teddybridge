@@ -398,6 +398,9 @@ class TcHandler(Base):
             tok = secrets.token_hex(32)
             TcHandler.sessions.add(tok)
             return self.send(200, {"ok": True, "username": cred["username"], "token": tok})
+        if u.path == "/_mock/encode-delay":
+            TcHandler.encode_delay = float(json.loads(self.body() or b"{}").get("secs", 0.5))
+            return self.send(200, "OK")
         if u.path == "/_mock/empty-uploads":
             cfg = json.loads(self.body() or b"{}")
             TcHandler.empty_uploads[cfg["match"]] = cfg["mode"]

@@ -479,6 +479,43 @@ print("RESULT" + json.dumps(out))
               "nocloud schon an: nicht erneut gesetzt; alte Quelle zurückgemeldet")
         ts = {x["ruid"]: x for x in c.get("/api/tonies").json()["tonies"]}
         check(ts[bobo]["source"] == "lib://" + part1, "Liste zeigt neue Belegung")
+
+        print("Tonie vormerken (Zuweisen nach Abschluss)")
+        F7, F8 = "f0070000-0000-4000-8000-000000000107", "f0080000-0000-4000-8000-000000000108"
+        mock = f"http://127.0.0.1:{TC_P}"
+        httpx.post(f"{mock}/_mock/encode-delay", json={"secs": 3})
+        c.post("/api/jobs/clear")
+        c.post("/api/jobs", json={"items": [{"id": F7}, {"id": F8}]})
+        jj = {j["item_id"]: j for j in c.get("/api/jobs").json()}
+        j7, j8 = jj[F7]["id"], jj[F8]["id"]
+        src_bobo = "lib://" + part1
+        r = c.post(f"/api/jobs/{j7}/tonie", json={"ruid": bobo, "expect": "falsch"})
+        check(r.status_code == 409, "vormerken mit veralteter Belegung: abgelehnt")
+        r = c.post(f"/api/jobs/{j7}/tonie", json={"ruid": bobo, "expect": src_bobo})
+        check(r.status_code == 200 and r.json()["tonie"]["name"].startswith("Bobo"), f"Bobo für F7 vorgemerkt {r.text[:150]}")
+        r = c.post(f"/api/jobs/{j8}/tonie", json={"ruid": bobo, "expect": src_bobo})
+        check(r.status_code == 409 and "vorgemerkt" in r.json()["detail"], "dieselbe Figur für zweiten Auftrag: abgelehnt")
+        r = c.post(f"/api/jobs/{j8}/tonie", json={"ruid": fremd, "expect": "lib://" + umlaut})
+        check(r.status_code == 200, "andere Figur für F8 vorgemerkt")
+        check(c.post("/api/jobs/99999/tonie", json={"ruid": bobo, "expect": ""}).status_code == 404, "unbekannter Auftrag: 404")
+        check(c.get("/api/jobs").json()[0]["tonie"]["ruid"] == bobo, "Vormerkung in der Warteschlange sichtbar")
+        # Belegung von F8s Figur ändert sich zwischendurch (z. B. in TeddyCloud) -> dort nicht zuweisen
+        httpx.post(f"{mock}/content/json/set/{fremd}", content=b"source=lib%3A%2F%2Fanders.taf",
+                   headers={"Content-Type": "application/x-www-form-urlencoded"}, auth=("tcuser", TC_PW))
+        nsets = len(httpx.get(f"{mock}/_mock/tags").json()["sets"])
+        jj = {j["item_id"]: j for j in wait_jobs(c, 2)}
+        httpx.post(f"{mock}/_mock/encode-delay", json={"secs": 0.2})
+        mt = httpx.get(f"{mock}/_mock/tags").json()
+        check(jj[F7]["state"] == "done" and jj[F7]["tonie_ok"] is True and mt["tags"][bobo]["source"] == "lib://" + jj[F7]["tafs"][0],
+              f"F7 fertig -> Bobo automatisch zugewiesen ({jj[F7].get('tonie_result')})")
+        check(jj[F8]["state"] == "done" and jj[F8]["tonie_ok"] is False and "geändert" in jj[F8]["tonie_result"]
+              and mt["tags"][fremd]["source"] == "lib://anders.taf", f"F8: Belegung inzwischen geändert -> nicht überschrieben ({jj[F8].get('tonie_result')})")
+        check(len(mt["sets"]) == nsets + 1, "nur die eine Quelle von Bobo geändert (nocloud war schon an)")
+        r = c.post(f"/api/jobs/{j7}/tonie", json={"ruid": bobo, "expect": mt["tags"][bobo]["source"]})
+        check(r.status_code == 409 and "abgeschlossen" in r.json()["detail"], "abgeschlossener Auftrag: nicht mehr vormerken")
+        disc = [m["content"] for m in httpx.get(f"{mock}/_mock/discord").json() if "Füllmaterial 07" in m.get("content", "")]
+        check(disc and "🧸" in disc[-1], "Discord-Meldung nennt die Zuweisung")
+        c.post("/api/jobs/clear")
         os.remove(os.path.join(lib, umlaut)), os.remove(os.path.join(lib, lang)), os.remove(os.path.join(lib, "fremd.taf"))
         shutil.rmtree(os.path.join(lib, BASE, "y" * 100))
 
@@ -497,19 +534,20 @@ print("RESULT" + json.dumps(out))
         print("Discord")
         for _ in range(50):  # Meldungen werden kurz nach dem jeweiligen Auftrag verschickt
             raw = httpx.get(f"http://127.0.0.1:{TC_P}/_mock/discord").json()
-            if len([m for m in raw if m["content"].startswith("📦")]) >= 2:
+            if len([m for m in raw if m["content"].startswith("📦")]) >= 3:
                 break
             time.sleep(0.1)
         msgs = [m["content"] for m in raw]
         check([m for m in msgs if m.startswith("📦")] == ["📦 teddybridge: 3 übertragen, 0 übersprungen, 2 Fehler",
+                                                         "📦 teddybridge: 2 übertragen, 0 übersprungen, 0 Fehler",
                                                          "📦 teddybridge: 1 übertragen, 2 übersprungen, 0 Fehler"],
               f"Summe nur bei Stapeln mit mehreren Aufträgen {[m for m in msgs if m.startswith('📦')]}")
         ok_msgs = [m for m in msgs if m.startswith("✅")]
         err_msgs = [m for m in msgs if m.startswith("❌")]
-        check(len(ok_msgs) == 8 and all("Kapitel" in m and "📁 " + BASE in m for m in ok_msgs),
+        check(len(ok_msgs) == 10 and all("Kapitel" in m and "📁 " + BASE in m for m in ok_msgs),
               f"pro fertigem Auftrag eine Meldung mit Kapiteln/Dauer und Ordner ({len(ok_msgs)})")
         check(len(err_msgs) == 3 and all("fehlgeschlagen:" in m for m in err_msgs), f"pro Fehler eine Meldung mit Grund ({len(err_msgs)})")
-        check(len(msgs) == 13, f"übersprungene ohne eigene Meldung (insgesamt {len(msgs)})")
+        check(len(msgs) == 16, f"übersprungene ohne eigene Meldung (insgesamt {len(msgs)})")
         check(all(m.get("allowed_mentions") == {"parse": []} for m in raw), "keine @-Erwähnungen aus Titeln")
 
         print("Leere Uploads")

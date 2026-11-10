@@ -778,49 +778,117 @@ class AssignRequest(BaseModel):
     expect: str = Field("", max_length=2000)          # Quelle, die der Nutzer beim Bestätigen gesehen hat
 
 
-def _own_taf(path):
-    """Nur eigene, vorhandene TAFs: unter TC_BASE (oder TC_BASE_EXTRA), kein _src_, kein '..'."""
+class AssignError(Exception):
+    def __init__(self, status, msg):
+        super().__init__(msg)
+        self.status = status
+
+
+def _check_path(path):
+    """Prüfung ohne TeddyCloud-Zugriff auf die Datei. -> neue Quelle lib://…"""
     parts = path.split("/")
     if not path.lower().endswith(".taf") or any(p in ("", ".", "..") or p.startswith("_src_") for p in parts) \
             or CTRL_RE.search(path) or "\\" in path:
-        raise HTTPException(422, t("ungültiger TAF-Pfad"))
+        raise AssignError(422, t("ungültiger TAF-Pfad"))
     if not any(path.startswith(b + "/") for b in CFG.tc_scan_bases):
-        raise HTTPException(422, t("nur TAFs aus dem eigenen Basisordner können zugewiesen werden"))
-    parent, name = "/".join(parts[:-1]), parts[-1]
-    if not any(f.get("name") == name and not f.get("isDirectory") for f in TC.list_dir(parent) or []):
-        raise HTTPException(404, t("TAF nicht gefunden: {path}", path=path))
-
-
-@app.post("/api/tonies/assign")
-def tonie_assign(req: AssignRequest):
-    if READONLY:
-        raise HTTPException(403, t("Nur-Lese-Modus: Zuweisen ist deaktiviert"))
-    path = req.path.strip()
-    _own_taf(path)
+        raise AssignError(422, t("nur TAFs aus dem eigenen Basisordner können zugewiesen werden"))
     new = "lib://" + path
     if len(new.encode()) > 255:  # TeddyCloud speichert höchstens 255 Bytes und kürzt sonst stillschweigend
-        raise HTTPException(422, t("Pfad zu lang für TeddyCloud ({n} von max. 255 Bytes) – Ordner oder Titel kürzen",
-                                   n=len(new.encode())))
+        raise AssignError(422, t("Pfad zu lang für TeddyCloud ({n} von max. 255 Bytes) – Ordner oder Titel kürzen",
+                                 n=len(new.encode())))
+    return new
+
+
+def _current(ruid, expect):
+    """Aktuelle Figur; Abbruch, wenn es sie nicht gibt oder die Belegung nicht mehr der bestätigten entspricht."""
+    cur = next((x for x in _tonie_list(fresh=True) if x["ruid"] == ruid), None)
+    if not cur:
+        raise AssignError(404, t("Tonie nicht gefunden (nur bestehende Figuren)"))
+    if cur["source"] != expect:
+        raise AssignError(409, t("Die Belegung von „{name}“ hat sich inzwischen geändert – bitte neu auswählen",
+                                 name=cur["name"]))
+    return cur
+
+
+def assign_tonie(ruid, path, expect):
+    """Eine eigene TAF einer bestehenden Figur zuweisen (wie die TeddyCloud-Oberfläche). -> {name, old, new}"""
+    if READONLY:
+        raise AssignError(403, t("Nur-Lese-Modus: Zuweisen ist deaktiviert"))
+    new = _check_path(path)
+    parent, name = path.rsplit("/", 1)
+    if not any(f.get("name") == name and not f.get("isDirectory") for f in TC.list_dir(parent) or []):
+        raise AssignError(404, t("TAF nicht gefunden: {path}", path=path))
     with _assign_lock:
-        cur = next((x for x in _tonie_list(fresh=True) if x["ruid"] == req.ruid), None)
-        if not cur:
-            raise HTTPException(404, t("Tonie nicht gefunden (nur bestehende Figuren)"))
-        if cur["source"] != req.expect:
-            raise HTTPException(409, t("Die Belegung von „{name}“ hat sich inzwischen geändert – bitte neu auswählen",
-                                       name=cur["name"]))
+        cur = _current(ruid, expect)
         if cur["source"] != new:
-            TC.set_tag(req.ruid, "source", new)
+            TC.set_tag(ruid, "source", new)
         if not cur["nocloud"]:
-            TC.set_tag(req.ruid, "nocloud", "true")
+            TC.set_tag(ruid, "nocloud", "true")
         if cur["live"]:
-            TC.set_tag(req.ruid, "live", "false")
-        after = next((x for x in _tonie_list(fresh=True) if x["ruid"] == req.ruid), None)
+            TC.set_tag(ruid, "live", "false")
+        after = next((x for x in _tonie_list(fresh=True) if x["ruid"] == ruid), None)
         if not after or after["source"] != new:
             raise ApiError(t("TeddyCloud hat die Zuweisung nicht übernommen (gelesen: {src})",
                              src=(after or {}).get("source") or "–"))
     if cur["source"] != new:
-        log.info("Tonie %s (%s) zugewiesen: Quelle %r -> %r", req.ruid, cur["name"], cur["source"] or "", new)
-    return {"ok": True, "name": cur["name"], "old": cur["source"], "new": new}
+        log.info("Tonie %s (%s) zugewiesen: Quelle %r -> %r", ruid, cur["name"], cur["source"] or "", new)
+    return {"name": cur["name"], "old": cur["source"], "new": new}
+
+
+@app.post("/api/tonies/assign")
+def tonie_assign(req: AssignRequest):
+    try:
+        return {"ok": True, **assign_tonie(req.ruid, req.path.strip(), req.expect)}
+    except AssignError as e:
+        raise HTTPException(e.status, str(e)) from None
+
+
+class ReserveRequest(BaseModel):
+    ruid: str | None = Field(None, pattern=r"^[0-9a-f]{16}$")  # None = Vormerkung entfernen
+    expect: str = Field("", max_length=2000)
+
+
+@app.post("/api/jobs/{jid}/tonie")
+def job_tonie(jid: int, req: ReserveRequest):
+    """Tonie vormerken: wird zugewiesen, sobald der Auftrag fertig ist (erste TAF bzw. Teil 1)."""
+    if READONLY:
+        raise HTTPException(403, t("Nur-Lese-Modus: Zuweisen ist deaktiviert"))
+    if jid not in QUEUE.jobs:
+        raise HTTPException(404, t("Auftrag nicht gefunden"))
+    tonie = None
+    if req.ruid:
+        try:
+            cur = _current(req.ruid, req.expect)
+        except AssignError as e:
+            raise HTTPException(e.status, str(e)) from None
+        tonie = {"ruid": req.ruid, "name": cur["name"], "expect": cur["source"]}
+    ok, why = QUEUE.set_tonie(jid, tonie)
+    if not ok:
+        if why == "missing":
+            raise HTTPException(404, t("Auftrag nicht gefunden"))
+        if why == "final":
+            raise HTTPException(409, t("Auftrag ist schon abgeschlossen – bitte direkt zuweisen"))
+        raise HTTPException(409, t("„{name}“ ist schon für „{title}“ vorgemerkt", name=tonie["name"], title=why))
+    if tonie:
+        log.info("Auftrag %s: Tonie %s (%s) vorgemerkt", jid, req.ruid, tonie["name"])
+    return {"ok": True, "tonie": tonie}
+
+
+def _auto_assign(jid, job):
+    """Aufruf aus dem Worker, wenn ein Auftrag mit vorgemerktem Tonie fertig/übersprungen ist."""
+    tn, tafs = job["tonie"], job.get("tafs") or []
+    try:
+        if not tafs:
+            raise AssignError(404, t("keine TAF gefunden"))
+        r = assign_tonie(tn["ruid"], tafs[0], tn["expect"])
+        res, ok = t("Tonie „{name}“ zugewiesen (vorher: {old})", name=r["name"], old=r["old"] or t("Original-Inhalt")), True
+    except (AssignError, ApiError) as e:
+        res, ok = t("Tonie „{name}“ nicht zugewiesen: {err}", name=tn["name"], err=str(e)), False
+        log.warning("Auftrag %s: %s", jid, res)
+    QUEUE._set(jid, tonie_result=res, tonie_ok=ok)
+
+
+QUEUE.on_final = _auto_assign
 
 
 @app.get("/api/jobs")

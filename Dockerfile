@@ -4,7 +4,7 @@ LABEL org.opencontainers.image.title="teddybridge" \
       org.opencontainers.image.description="Audiobookshelf, Navidrome and NAS to TeddyCloud (TAF)" \
       org.opencontainers.image.source="https://github.com/urza-lab/teddybridge" \
       org.opencontainers.image.licenses="AGPL-3.0-only" \
-      org.opencontainers.image.version="1.5.0"
+      org.opencontainers.image.version="1.5.1"
 
 # ffmpeg: cut m4b at chapters, merge formats other than MP3 (optional, but always included in the image)
 RUN apt-get update \
