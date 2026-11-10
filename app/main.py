@@ -655,6 +655,7 @@ class JobRequest(BaseModel):
     subfolder: str | None = Field(None, max_length=500)  # None/leer = automatische Ablage
     items: list[JobItem] = Field(min_length=1, max_length=500)
     bundle: str | None = Field(None, max_length=120)  # Name einer Sammel-TAF: alle items in *eine* TAF
+    chapter_min: int = Field(0, ge=0, le=120)  # Dateien ohne Kapitelmarken: etwa alle n min ein Kapitel (0 = aus)
 
 
 @app.post("/api/jobs")
@@ -698,10 +699,12 @@ def submit(req: JobRequest):
             raise HTTPException(422, t("Sammel-TAF: mindestens zwei Einträge auswählen"))
         if len({(i.source, i.lib, i.id, i.kind) for i in req.items}) != len(req.items):
             raise HTTPException(422, t("Sammel-TAF: ein Eintrag ist doppelt ausgewählt"))
+    if 0 < req.chapter_min < 3:
+        raise HTTPException(422, t("Kapitel nach Dauer: mindestens 3 min"))
     sub = (req.subfolder or "").strip() or None
     if sub:
         clean_folder(sub)
-    bid = QUEUE.submit([i.model_dump() for i in req.items], sub, bundle=bundle)
+    bid = QUEUE.submit([i.model_dump() for i in req.items], sub, bundle=bundle, chapter_min=req.chapter_min)
     return {"batch": bid}
 
 

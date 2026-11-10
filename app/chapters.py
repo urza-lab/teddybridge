@@ -10,6 +10,7 @@ Ist ffmpeg/ffprobe nicht installiert, passiert nichts (eine Datei = ein Kapitel 
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 
@@ -52,6 +53,32 @@ def probe(path):
         raise ApiError(t("Kapitel lesen: unerwartete Ausgabe von ffprobe")) from None
     chs = sorted(c for c in chs if c[1] - c[0] >= MIN_CHAPTER)
     return chs, total
+
+
+def silences(path, noise_db=-35, min_len=0.4, timeout=3600):
+    """Pausen in einer Audiodatei finden (ffmpeg silencedetect, liest die ganze Datei). -> Mitten der Pausen in s."""
+    cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-v", "info", "-i", path, "-vn", "-sn", "-dn",
+           "-af", f"silencedetect=noise={noise_db}dB:d={min_len}", "-f", "null", "-"]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise ApiError(f"{t('Pausen suchen')}: {type(e).__name__}") from None
+    if r.returncode != 0:
+        raise ApiError(t("{what} fehlgeschlagen: {detail}", what=t("Pausen suchen"), detail="ffmpeg"))
+    out, start = [], None
+    for line in (r.stderr or "").splitlines():
+        m = SIL.search(line)
+        if not m:
+            continue
+        if m.group(1) == "start":
+            start = float(m.group(2))
+        elif start is not None:
+            out.append((start + float(m.group(2))) / 2)
+            start = None
+    return out
+
+
+SIL = re.compile(r"silence_(start|end): (-?\d+(?:\.\d+)?)")
 
 
 def ranges(chs):

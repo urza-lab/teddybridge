@@ -49,14 +49,25 @@ Tick “**in parts of 60 min**” next to the transfer button (remembered in the
 
 - The number of parts is the total duration divided by 60 min, rounded (so an 80-min book stays **one** TAF, a 100-min book becomes 2 parts of 50 min).
 - Cuts are made at **file or chapter boundaries**, each at the boundary closest to the ideal point – so parts are roughly, not exactly, 60 min.
-- A single long file without usable boundaries (e.g. one 10-hour MP3) is cut into equal time ranges, losslessly with **ffmpeg** (included in the Docker image); without ffmpeg it stays one TAF.
+- A single long file without usable boundaries (e.g. one 10-hour MP3) is cut with **ffmpeg** (included in the Docker image) into ranges of about 60 min, each cut moved to the nearest **pause** (see below); without ffmpeg it stays one TAF.
 - More than 99 files within one part are merged as described above; the 99-file question does not appear.
 - Same markers as the 99-file split: missing parts are transferred again, existing ones skipped. If the book already exists as **one** TAF, it is skipped (delete it in TeddyCloud first to get parts). If it already exists in a **different number** of parts, teddybridge refuses instead of mixing two splits.
 - Not available for “as one TAF” collections.
 
 ### One file with chapters (m4b)
 
-If **ffmpeg** is installed (optional), an audiobook consisting of a single file with chapter marks (typically `.m4b`) is cut losslessly (`-c copy`) at the chapters – every chapter becomes a TAF chapter. With Audiobookshelf the chapters come from its metadata; with the file source, ffprobe reads them directly (read-only). With more than 99 chapters, the shortest adjacent ones are combined (simply fewer cuts). Without ffmpeg or without chapter marks, the file is transferred as one chapter.
+If **ffmpeg** is installed (optional), an audiobook consisting of a single file with chapter marks (typically `.m4b`) is cut losslessly (`-c copy`) at the chapters – every chapter becomes a TAF chapter. With Audiobookshelf the chapters come from its metadata; with the file source, ffprobe reads them directly (read-only). With more than 99 chapters, the shortest adjacent ones are combined (simply fewer cuts). Without ffmpeg or without chapter marks, the file is transferred as one chapter – unless you use the option below.
+
+### Chapters for files without chapter marks (option, since 1.4)
+
+A long file without chapter marks (e.g. a 10-hour MP3) normally becomes a TAF with a single chapter, so you cannot skip on the box. Enter a number in “**Chapters every … min**” next to the transfer button (3–120, empty = off, remembered in the browser): such files then get a chapter about every that many minutes.
+
+- Only files **without** chapter marks are touched, and only if they are longer than 1.5 × the interval; real chapters (m4b, ABS metadata) and normal multi-file audiobooks stay as they are.
+- Each cut is moved to the nearest **pause** (silence of at least 0.4 s below −35 dB, found with ffmpeg `silencedetect`), at most 3 min or a quarter of the interval away, so a chapter does not end mid-sentence. If there is no pause nearby, the cut stays at the exact time. The queue shows how many cuts landed in a pause.
+- Finding pauses reads the whole file once (roughly 1–2 min for a 10-hour book); the cutting itself is lossless (`-c copy`).
+- Combinable with “in parts of 60 min”: the parts are then cut at these chapter boundaries.
+- File source: works for a folder with a single file (its duration is read with ffprobe); for multi-file folders the file durations are unknown, so nothing is added.
+- Needs ffmpeg (always in the Docker image).
 
 ### Several audiobooks in one TAF
 

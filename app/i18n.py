@@ -88,6 +88,10 @@ EN = {
     "nicht aufgeteilt (kürzer als ca. {m} min)": "not split (shorter than about {m} min)",
     "nicht aufteilbar (eine Datei ohne Kapitel)": "cannot be split (one file without chapters)",
     "in {n} Teile à ca. {m} min aufgeteilt": "split into {n} parts of about {m} min",
+    "Kapitel alle ca. {m} min ergänzt": "added a chapter about every {m} min",
+    "{k} von {n} Schnitten in einer Pause": "{k} of {n} cuts placed in a pause",
+    "Pausen suchen": "Finding pauses",
+    "Kapitel nach Dauer: mindestens 3 min": "chapters by duration: at least 3 min",
     "liegt in TeddyCloud schon in {old} Teilen vor, jetzt wären es {n} – nicht gemischt; "
     "zum neu Aufteilen die vorhandenen Teile in TeddyCloud löschen":
         "already in TeddyCloud as {old} parts, now it would be {n} – not mixed; "

@@ -126,6 +126,29 @@ def main():
             check(len(worker.split_by_time(worker.expand([fa]), H)) == 1, "ohne ffmpeg: eine lange Datei bleibt ganz")
         finally:
             chapters.available = real
+        print("Kapitel ohne Marken: Zerlegen und Schnitte an Pausen")
+        chapters.available = lambda: True
+        try:
+            f = {"ext": "mp3", "dur": 1800.0, "book": 0}
+            ps = worker.subdivide(worker.expand([f, mp(300)]), 600, only_whole=True)
+            check(len(ps) == 4 and ps[0]["start"] == 0.0 and ps[2]["end"] is None and not ps[3].get("cut"),
+                  "30-min-Datei à 10 min: 3 Bereiche, kurze Datei bleibt")
+            m4 = worker.expand([{"ext": "m4b", "dur": 3 * H, "chapters": [(0.0, H), (H, 3 * H)], "book": 0}])
+            check(len(worker.subdivide(m4, 600, only_whole=True)) == 2, "Kapitelbereiche werden beim Kapitel-Fallback nicht zerlegt")
+            moved, total = worker.snap_cuts(ps, [590.0, 1400.0, 1900.0])
+            check((moved, total) == (1, 2) and ps[0]["end"] == ps[1]["start"] == 590.0 and ps[1]["end"] == 1200.0
+                  and abs(ps[0]["dur"] - 590) < 1e-6 and abs(ps[1]["dur"] - 610) < 1e-6,
+                  "Schnitt rückt zur nahen Pause (590), zu weit entfernte (1400: 200 > 150 s) bleibt exakt")
+            check(ps[2]["end"] is None and ps[3]["start"] is None, "Grenze zur nächsten Datei bleibt unberührt")
+        finally:
+            chapters.available = real
+        if chapters.available():
+            sp = os.path.join(tmp, "pause.mp3")
+            ff("-f", "lavfi", "-i", "sine=d=5", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono:d=1", "-f", "lavfi", "-i", "sine=d=4",
+               "-filter_complex", "[0]aformat=sample_rates=44100:channel_layouts=mono[a];[2]aformat=sample_rates=44100:channel_layouts=mono[c];"
+               "[a][1][c]concat=n=3:v=0:a=1", "-c:a", "libmp3lame", "-b:a", "32k", sp)
+            sil = chapters.silences(sp)
+            check(len(sil) == 1 and abs(sil[0] - 5.5) < 0.2, f"Pause in echter MP3 gefunden ({sil})")
         check(worker.part_name("Buch", 3, 12, "abcd1234") == "Buch - Teil 03 von 12 [abcd1234-3].taf"
               and worker.part_name("Buch", 2, 2, "abcd1234") == "Buch - Teil 2 von 2 [abcd1234-2].taf",
               "Teil-Namen: führende Null ab 10 Teilen, Kennzeichen ohne")

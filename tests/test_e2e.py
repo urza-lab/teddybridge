@@ -87,7 +87,8 @@ def make_real_audio(base, tmp):
         v.append(p)
     low = os.path.join(gen, "22k.mp3")
     ta.tone(low, 0.2, rate=22050, extra=("-c:a", "libmp3lame", "-b:a", "48k"))
-    dirs = {t: os.path.join(base, t) for t in ("Lang", "Gemischt", "Nicht MP3", "Buch", "Buch Gross", "ENCODE-CRASH", "ENCODE-CRASH-ONCE", "Halb", "Alt")}
+    dirs = {t: os.path.join(base, t) for t in ("Lang", "Gemischt", "Nicht MP3", "Buch", "Buch Gross", "ENCODE-CRASH", "ENCODE-CRASH-ONCE", "Halb", "Alt",
+                                               "Einzeldatei")}
     for d in dirs.values():
         os.makedirs(d)
     for i in range(1, 131):
@@ -105,6 +106,11 @@ def make_real_audio(base, tmp):
         shutil.copy(m4a, os.path.join(dirs["Nicht MP3"], n))
     ta.m4b(os.path.join(dirs["Buch"], "buch.m4b"), [3.0, 1.0, 4.0, 2.0, 5.0, 1.5, 2.5, 3.0, 1.0, 2.0, 4.0, 3.0], gen)
     ta.m4b(os.path.join(dirs["Buch Gross"], "buch.m4b"), [0.6 + (i % 5) * 0.3 for i in range(130)], gen)
+    # eine Datei ohne Kapitel, 400 s, Pause (2 s Stille) bei 170–172 s
+    ta.ff("-f", "lavfi", "-i", "sine=f=440:d=170", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo:d=2",
+          "-f", "lavfi", "-i", "sine=f=440:d=228", "-filter_complex",
+          "[0]aformat=sample_rates=44100:channel_layouts=stereo[a];[2]aformat=sample_rates=44100:channel_layouts=stereo[c];"
+          "[a][1][c]concat=n=3:v=0:a=1", "-c:a", "libmp3lame", "-b:a", "32k", os.path.join(dirs["Einzeldatei"], "alles.mp3"))
     return dirs
 
 
@@ -701,6 +707,19 @@ print("RESULT" + json.dumps(out))
                 check(j["note"] == ("1 Datei in 12 Kapitel geschnitten" if n == 12 else
                                     "1 Datei in 130 Kapitel geschnitten, zu 99 zusammengefügt"), f"Hinweis: {j['note']}")
                 c.post("/api/jobs/clear")
+
+            print("Kapitel ohne Kapitelmarken (an Pausen)")
+            check(c.post("/api/jobs", json={"chapter_min": 2, "items": [fsi0 := {"id": eb["Einzeldatei"]["id"], "source": "fs", "lib": "0"}]})
+                  .status_code == 422, "Kapitel alle 2 min: abgelehnt (mind. 3)")
+            c.post("/api/jobs", json={"chapter_min": 3, "items": [fsi0]})
+            j = wait_jobs(c, 1)[0]
+            t = taf("Einzeldatei", eb["Einzeldatei"]["mark"])
+            lens = [ta.decoded_seconds(p)[0] for p in kept(t)] if os.path.exists(t) else []
+            check(j["state"] == "done" and len(lens) == 2 and abs(lens[0] - 171) < 1.5 and abs(sum(lens) - 400) < 1,
+                  f"400 s, Kapitel alle 3 min: 2 Kapitel, Schnitt in der Pause bei 171 s ({lens}, {j['state']} {j.get('error') or ''})")
+            check("Kapitel alle ca. 3 min" in (j["note"] or "") and "1 von 1 Schnitten in einer Pause" in (j["note"] or ""),
+                  f"Hinweis: {j['note']}")
+            c.post("/api/jobs/clear")
 
             print("Kapitel aus ABS (m4b) und Sammel-TAF")
             c.post("/api/jobs", json={"items": [{"id": M4B_ID}]})

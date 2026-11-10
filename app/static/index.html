@@ -96,6 +96,7 @@ h3.sub{margin:22px 0 8px;font-size:15px;color:var(--mut)}
   <span id="customWrap" hidden><span class="base" id="baseLbl">…</span>/<input id="folder" spellcheck="false" placeholder="z. B. Weihnachten"></span>
   <span id="bundleWrap" hidden><label title="Alle ausgewählten Hörbücher nacheinander in eine einzige TAF, in der Reihenfolge der Auswahl"><input type="checkbox" id="bundle"> als eine TAF</label>
     <input id="bundleName" spellcheck="false" placeholder="Name der TAF" maxlength="120" hidden></span>
+  <label id="chapWrap" title="Nur für Dateien ohne Kapitelmarken (z. B. eine lange MP3): etwa alle so viele Minuten ein Kapitel, geschnitten in einer Sprechpause. Leer = aus.">Kapitel alle <input type="number" id="chapMin" min="3" max="120" step="1" placeholder="–" style="width:4.5em"> min</label>
   <label id="partsWrap" title="Lange Hörbücher in mehrere TAFs von etwa 60 min aufteilen („Teil 01 von 12“), geschnitten an Datei- bzw. Kapitelgrenzen. Unter ca. 90 min bleibt es eine TAF."><input type="checkbox" id="parts"> in Teile à 60 min</label>
   <button id="send" class="primary" disabled>Nach TeddyCloud (0)</button>
   <button id="none">Auswahl leeren</button>
@@ -140,7 +141,9 @@ const EN = {
   'Abmelden':'Log out', 'Einstellungen':'Settings', 'Ablage':'Destination', 'Automatisch':'Automatic', 'Eigener Unterordner':'Custom subfolder',
   'z. B. Weihnachten':'e.g. Christmas',
   'Alle ausgewählten Hörbücher nacheinander in eine einzige TAF, in der Reihenfolge der Auswahl':'All selected audiobooks one after another in a single TAF, in the order of selection',
-  'als eine TAF':'as one TAF', 'in Teile à 60 min':'in parts of 60 min',
+  'als eine TAF':'as one TAF', 'Kapitel alle':'Chapters every',
+  'Nur für Dateien ohne Kapitelmarken (z. B. eine lange MP3): etwa alle so viele Minuten ein Kapitel, geschnitten in einer Sprechpause. Leer = aus.':'Only for files without chapter marks (e.g. one long MP3): a chapter about every this many minutes, cut in a pause. Empty = off.',
+  'Pausen suchen …':'finding pauses …', 'Bitte 3–120 min für die Kapitel angeben oder leer lassen.':'Please enter 3–120 min for chapters or leave it empty.', 'in Teile à 60 min':'in parts of 60 min',
   'Lange Hörbücher in mehrere TAFs von etwa 60 min aufteilen („Teil 01 von 12“), geschnitten an Datei- bzw. Kapitelgrenzen. Unter ca. 90 min bleibt es eine TAF.':'Split long audiobooks into several TAFs of about 60 min (“Part 01 of 12”), cut at file or chapter boundaries. Below about 90 min it stays one TAF.', 'Name der TAF':'Name of the TAF', 'Auswahl leeren':'Clear selection',
   'Eigene Playlist':'Custom playlist', 'Name der Playlist':'Playlist name', 'Als eine TAF nach TeddyCloud':'To TeddyCloud as one TAF',
   'Leeren':'Clear', 'Liste':'List', 'Mehr laden':'Load more', 'Nichts gefunden.':'Nothing found.',
@@ -190,9 +193,9 @@ function setLang(l){
 }
 const st = {mix:[], src:'abs', lib:null, libs:[], view:'all', page:0, total:0, items:[], sel:new Map(), present:new Set(), coll:null, q:'', max:99};
 const PAGE = 48;
-const ACTIVE = ['downloading','preparing','uploading','encoding'];
+const ACTIVE = ['downloading','analyzing','preparing','uploading','encoding'];
 const fmtEta = s => s>=3600 ? `${Math.floor(s/3600)} h ${String(Math.floor(s%3600/60)).padStart(2,'0')} min` : `${Math.max(1,Math.round(s/60))} min`;
-const LABEL = {waiting:'wartend', downloading:'herunterladen', uploading:'hochladen', preparing:'vorbereiten (Kapitel schneiden/zusammenfügen) …', retrying:'TeddyCloud abgebrochen – warte und versuche neu …', encoding:'umwandeln …', done:'fertig', skipped:'übersprungen (schon vorhanden)', error:'Fehler'};  // übersetzt bei der Anzeige
+const LABEL = {waiting:'wartend', downloading:'herunterladen', uploading:'hochladen', preparing:'vorbereiten (Kapitel schneiden/zusammenfügen) …', analyzing:'Pausen suchen …', retrying:'TeddyCloud abgebrochen – warte und versuche neu …', encoding:'umwandeln …', done:'fertig', skipped:'übersprungen (schon vorhanden)', error:'Fehler'};  // übersetzt bei der Anzeige
 
 async function api(path, opt){
   const r = await fetch(path, opt);
@@ -467,6 +470,8 @@ async function send(){
   let items=[...st.sel.values()].map(it=>({id:it.id,title:it.title,files:it.files,source:it.source||'abs',lib:it.lib,kind:it.kind||'album'}));
   const bundle=items.length>=2&&$('#bundle').checked?$('#bundleName').value.trim():null;
   if(items.length>=2&&$('#bundle').checked&&!bundle){ msg(T('Bitte einen Namen für die TAF angeben.')); $('#bundleName').focus(); return; }
+  const cm=$('#chapMin').value.trim(), chapter_min=cm?Number(cm):0;
+  if(cm&&!(Number.isInteger(chapter_min)&&chapter_min>=3&&chapter_min<=120)){ msg(T('Bitte 3–120 min für die Kapitel angeben oder leer lassen.')); $('#chapMin').focus(); return; }
   const parts=!bundle&&$('#parts').checked;  // Teile à 60 min: über 99 Dateien wird je Teil automatisch zusammengefügt
   const big=bundle||parts?[]:items.filter(it=>it.files>st.max);  // Sammel-TAF: über 99 Kapitel wird automatisch zusammengefügt
   let split=false, merge=false;
@@ -478,7 +483,7 @@ async function send(){
   }
   items=items.map(it=>({id:it.id,title:it.title,source:it.source,kind:it.kind,lib:(it.source==='nd'||it.source==='fs')?String(it.lib):null,split:split&&it.files>st.max,merge:merge&&it.files>st.max,parts_min:parts?60:0}));
   $('#send').disabled=true; msg('');
-  try{ await api('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subfolder,items,bundle})});
+  try{ await api('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subfolder,items,bundle,chapter_min})});
        $('#bundle').checked=false; $('#bundleName').value=''; st.sel.clear(); markTiles(); $('#queue').dataset.closed='0'; $('#queue').hidden=false; poll(); }
   catch(e){ msg(e.message); markTiles(); }
 }
@@ -533,6 +538,8 @@ $('#more').onclick=()=>{st.page++; loadPage();};
 let qTimer; $('#q').oninput=e=>{clearTimeout(qTimer); qTimer=setTimeout(()=>search(e.target.value.trim()),350);};
 $('#bundle').onchange=()=>{markTiles(); if($('#bundle').checked) $('#bundleName').focus();};
 try{ $('#parts').checked=localStorage.getItem('tb_parts')==='1'; }catch(e){}
+try{ $('#chapMin').value=localStorage.getItem('tb_chap_min')||''; }catch(e){}
+$('#chapMin').onchange=()=>{ try{ localStorage.setItem('tb_chap_min',$('#chapMin').value.trim()); }catch(e){} };
 $('#parts').onchange=()=>{ try{ localStorage.setItem('tb_parts',$('#parts').checked?'1':'0'); }catch(e){} };
 $('#mode').onchange=e=>{$('#customWrap').hidden=e.target.value!=='custom'; if(!$('#customWrap').hidden) $('#folder').focus();};
 $('#send').onclick=send;

@@ -282,24 +282,60 @@ def split_parts(files):
     return [files[i:i + size] for i in range(0, len(files), size)]
 
 
+SNAP_MAX = 180.0  # Sekunden: so weit darf ein Schnitt höchstens zur nächsten Pause rücken
+_grp = itertools.count(1)
+
+
+def subdivide(pieces, target, only_whole=False):
+    """Stücke, die deutlich länger als `target` Sekunden sind (> 1,5 ×), in gleich lange Bereiche zerlegen,
+    sofern das geht (ffmpeg da, Format schneidbar, Dauer bekannt). only_whole: nur ganze Dateien (also
+    Dateien ohne Kapitelmarken), Kapitelbereiche bleiben. Die neuen Stücke tragen 'cut' (Gruppe) und 'step';
+    ihre inneren Grenzen rücken später an Pausen (snap_cuts)."""
+    if not chapters.available():
+        return list(pieces)
+    out = []
+    for p in pieces:
+        dur = p.get("dur") or 0
+        if dur > 1.5 * target and chapters.OUT_EXT.get(_ext(p["f"])) and not (only_whole and not _whole(p)) \
+                and not p.get("cut"):
+            k = round(dur / target)
+            s0, step, g = p["start"] or 0.0, dur / k, next(_grp)
+            for i in range(k):
+                e = s0 + step * (i + 1) if i + 1 < k else p["end"]
+                out.append({**p, "start": s0 + step * i, "end": e, "dur": step, "cut": g, "step": step})
+        else:
+            out.append(p)
+    return out
+
+
+def snap_cuts(pieces, sil):
+    """Innere Schnitte zerlegter Stücke (gleiche 'cut'-Gruppe, gleiche Datei) zur nächsten Pause verschieben,
+    höchstens SNAP_MAX bzw. ein Viertel der Stücklänge weit (so überholen sich Schnitte nie). Ändert die Stücke
+    direkt. -> (verschoben, Schnitte gesamt)"""
+    moved = total = 0
+    sil = sorted(sil)
+    for a, b in zip(pieces, pieces[1:]):
+        if not a.get("cut") or a.get("cut") != b.get("cut") or a["end"] is None:
+            continue
+        total += 1
+        x, win = a["end"], min(SNAP_MAX, 0.25 * a["step"])
+        near = [s for s in sil if abs(s - x) <= win]
+        if not near:
+            continue
+        s = min(near, key=lambda s: abs(s - x))
+        a["end"] = b["start"] = s
+        a["dur"] = s - (a["start"] or 0.0)
+        b["dur"] = ((b["end"] if b["end"] is not None else (b["f"].get("dur") or s)) - s)
+        moved += 1
+    return moved, total
+
+
 def split_by_time(pieces, target):
     """In Teile von etwa `target` Sekunden aufteilen (Option „Teile à ca. 60 min“). -> Liste von Stück-Listen.
     Geschnitten wird an Datei-/Kapitelgrenzen, jeweils an der Grenze, die der idealen Stelle am nächsten liegt.
     Ein einzelnes Stück, das deutlich länger ist (> 1,5 × target), wird vorher in gleich lange Bereiche
-    zerlegt, sofern das geht (ffmpeg da, Format schneidbar, Dauer bekannt). Höchstens 99 Teile."""
-    can_cut = chapters.available()
-    out = []
-    for p in pieces:
-        dur = p.get("dur") or 0
-        if dur > 1.5 * target and can_cut and chapters.OUT_EXT.get(_ext(p["f"])):
-            k = round(dur / target)
-            s0 = p["start"] or 0.0
-            step = dur / k
-            for i in range(k):
-                e = s0 + step * (i + 1) if i + 1 < k else p["end"]
-                out.append({**p, "start": s0 + step * i, "end": e, "dur": step})
-        else:
-            out.append(p)
+    zerlegt (subdivide). Höchstens 99 Teile."""
+    out = subdivide(pieces, target)
     w = [p["dur"] or (p["f"].get("size") or 16000) / 16000 for p in out]
     total = sum(w)
     n = max(1, min(MAX_FILES, round(total / target), len(out)))
@@ -354,8 +390,9 @@ class Queue:
 
     # ---------- öffentliche API
 
-    def submit(self, items, subfolder=None, bundle=None):
-        """bundle: Name einer Sammel-TAF – dann werden alle items (in dieser Reihenfolge) zu *einer* TAF."""
+    def submit(self, items, subfolder=None, bundle=None, chapter_min=0):
+        """bundle: Name einer Sammel-TAF – dann werden alle items (in dieser Reihenfolge) zu *einer* TAF.
+        chapter_min: Dateien ohne Kapitelmarken bekommen etwa alle so viele Minuten ein Kapitel (0 = aus)."""
         sub = clean_folder(subfolder) if subfolder else None
         if bundle:
             key = ";".join(f"{i.get('source') or 'abs'}:{i.get('lib') or ''}:{i['id']}:{i.get('kind') or 'album'}"
@@ -375,7 +412,7 @@ class Queue:
                     "mark": it.get("mark") or (self.fs.mark(it.get("lib"), it["id"]) if it.get("source") == "fs" else
                              id8(it["id"], it.get("source") or "abs", it.get("kind") or "album", it.get("songs"))),
                     "subfolder": sub, "split": bool(it.get("split")), "merge": bool(it.get("merge")),
-                    "parts_min": int(it.get("parts_min") or 0),
+                    "parts_min": int(it.get("parts_min") or 0), "chapter_min": int(chapter_min or 0),
                     "folder": f"{self.cfg.tc_base}/{sub}" if sub else None,
                     "state": "waiting", "n": 0, "m": 0, "part": 0, "parts": 0, "error": None,
                     "taf": None, "check": None, "warning": None, "note": None,
@@ -553,8 +590,14 @@ class Queue:
 
         clean = clean_name(numbered(title, seq))
         pieces = expand(files)
-        chunks, split_note = None, None
+        chunks, split_note, chap_note = None, None, None
+        if job.get("chapter_min"):
+            before = len(pieces)
+            pieces = subdivide(pieces, job["chapter_min"] * 60, only_whole=True)
+            if len(pieces) > before:
+                chap_note = t("Kapitel alle ca. {m} min ergänzt", m=job["chapter_min"])
         if by_time:
+            pieces = subdivide(pieces, job["parts_min"] * 60)
             chunks = split_by_time(pieces, job["parts_min"] * 60)
             if len(chunks) == 1:
                 chunks = None
@@ -586,11 +629,15 @@ class Queue:
             plan = [(f"{clean} [{short}].taf", units)]
         nunits = sum(len(c) for _, c in plan)
         note = note_for(len({f.get("book", 0) for f in files}), len(files), len(pieces), nunits)
-        if split_note:
-            note = split_note + (f"; {note}" if note else "")
+        note = "; ".join(x for x in (split_note, chap_note, note) if x) or None
         if note:
             log.info("Auftrag %s: %s", jid, note)
         todo = [u for _, c in plan for u in c]
+        synth = {}  # Datei -> alle zerlegten Stücke daraus (auch aus schon vorhandenen Teilen, damit Schnitte gleich bleiben)
+        for p in pieces:
+            if p.get("cut"):
+                synth.setdefault(id(p["f"]), []).append(p)
+        snapped = [0, 0]
         last_use = {}
         for k, u in enumerate(todo):
             for p in u:
@@ -623,6 +670,13 @@ class Queue:
                             path = os.path.join(tmp, f"q{n:04d}.{ext}")
                             p["f"]["fetch"](path)
                             cache[id(p["f"])] = path
+                            if id(p["f"]) in synth:  # Schnitte ohne Kapitelmarke: an die nächste Pause rücken
+                                self._set(jid, state="analyzing", n=n)
+                                moved, total = snap_cuts(synth[id(p["f"])], chapters.silences(path))
+                                snapped[0] += moved
+                                snapped[1] += total
+                                self._set(jid, note="; ".join(x for x in (note, t("{k} von {n} Schnitten in einer Pause",
+                                                                                   k=snapped[0], n=snapped[1])) if x))
                     self._set(jid, state="preparing" if len(unit) > 1 or not _whole(unit[0]) else "uploading", n=n)
                     local = self._build(unit, cache, tmp, k)
                     name = f"{k:03d}{os.path.splitext(local)[1] or '.mp3'}"
