@@ -12,8 +12,8 @@ A web UI to browse audiobooks, radio plays and music from **Audiobookshelf**, **
 |---|---|
 | **Purpose** | Get audiobooks/albums from existing media servers into TeddyCloud without copying and converting files by hand. |
 | **Sources** | Audiobookshelf, Navidrome and/or folders in the file system (e.g. a NAS via NFS/SMB) – at least one, any combination. All **read-only**. |
-| **Target** | The TeddyCloud library. teddybridge only creates files. It deletes nothing but its own temporary `_src_*` folders – and a TAF that the same run created itself and that is provably incomplete after TeddyCloud aborted (before the automatic retry). |
-| **Tech** | Python 3.11+, FastAPI/uvicorn, httpx, a single HTML page with vanilla JS and no build step. No database. Optional ffmpeg (m4b chapters, merging formats other than MP3). |
+| **Target** | The TeddyCloud library. teddybridge only creates files. It deletes nothing but its own temporary `_src_*` folders – and a TAF that the same run created itself and that is provably incomplete after TeddyCloud aborted (before the automatic retry). The only change to existing settings: on request it assigns one of its own TAFs to an existing Tonie figure, after confirmation (since 1.5). |
+| **Tech** | Python 3.11+, FastAPI/uvicorn, httpx, a single HTML page with vanilla JS and no build step. No database. Optional ffmpeg (m4b chapters, merging formats other than MP3, cutting long files and finding pauses); always included in the Docker image. |
 | **Deployment** | Docker container (prebuilt image `ghcr.io/urza-lab/teddybridge`) or systemd service, both hardened (templates in `deploy/`). First-time setup in the browser (since 1.2) or via environment variables. Meant for a trusted home network, optionally behind an internal reverse proxy with HTTPS. **Do not expose it to the internet.** |
 | **Security** | Login with scrypt hash and HttpOnly session cookie. Credentials for ABS, Navidrome and TeddyCloud stay in the backend. Security headers (CSP; framing only by origins listed in `FRAME_ANCESTORS`). No known vulnerabilities in dependencies (pip-audit, as of 2026-11-08). See [Security](#security). |
 
@@ -261,11 +261,11 @@ If the browser does not allow the redirect without a click, an “Open teddybrid
 
 ```sh
 venv/bin/python tests/test_e2e.py     # end-to-end against mock servers
-venv/bin/python tests/test_audio.py   # MP3 merging and m4b chapters with real audio files (needs ffmpeg)
+venv/bin/python tests/test_audio.py   # MP3 merging, m4b chapters, parts and pause detection with real audio files (needs ffmpeg)
 venv/bin/python tests/test_setup.py   # setup and settings page: one-time codes, tests, saving, restart
 ```
 
-Starts mock servers for Audiobookshelf, Navidrome and TeddyCloud (`mock/`) plus a simulated NAS directory and checks login, browsing, transfer, duplicates, splitting, merging (verified byte by byte, or every chapter decoded and measured), m4b chapters (ABS and file source), multi-audiobook TAFs, starting with only one source, both languages, cleanup on errors, path escapes, security headers, and that **no secret appears in the log or UI**. Passwords in tests and mocks are made up.
+Starts mock servers for Audiobookshelf, Navidrome and TeddyCloud (`mock/`) plus a simulated NAS directory and checks login, browsing, transfer, duplicates, splitting, merging (verified byte by byte, or every chapter decoded and measured), m4b chapters (ABS and file source), parts of about 60 min, chapters cut in pauses, multi-audiobook TAFs, assigning and reserving Tonies (including refusals and that nothing changes then), starting with only one source, both languages, cleanup on errors, path escapes, security headers, and that **no secret appears in the log or UI**. Passwords in tests and mocks are made up.
 
 ## Security
 
