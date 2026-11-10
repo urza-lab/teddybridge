@@ -644,6 +644,7 @@ class JobItem(BaseModel):
     title: str = Field("", max_length=500)
     split: bool = False
     merge: bool = False  # >99 Dateien: kürzeste Nachbarn zu einer TAF zusammenfügen (statt aufteilen)
+    parts_min: int = Field(0, ge=0, le=600)  # >0: in Teile von etwa so vielen Minuten aufteilen (Oberfläche: 60)
     source: str = Field("abs", pattern=r"^(abs|nd|fs)$")
     lib: str | None = Field(None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
     kind: str = Field("album", pattern=r"^(album|playlist|songs)$")  # songs = eigene Playlist (nur Navidrome)
@@ -675,6 +676,12 @@ def submit(req: JobRequest):
             FS.resolve(i.lib, i.id)  # wirft bei ungültigem Pfad / ausserhalb der Freigabe
         if i.split and i.merge:
             raise HTTPException(422, t("entweder Aufteilen oder Zusammenfügen"))
+        if i.parts_min and (i.split or i.merge):
+            raise HTTPException(422, t("entweder Teile nach Dauer oder Aufteilen/Zusammenfügen"))
+        if i.parts_min and req.bundle is not None:
+            raise HTTPException(422, t("eine Sammel-TAF kann nicht nach Dauer aufgeteilt werden"))
+        if 0 < i.parts_min < 10:
+            raise HTTPException(422, t("Teile nach Dauer: mindestens 10 min"))
         if i.kind != "album" and i.source != "nd":
             raise HTTPException(422, t("Playlists gibt es nur bei Navidrome"))
         if i.kind == "songs":

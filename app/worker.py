@@ -282,6 +282,52 @@ def split_parts(files):
     return [files[i:i + size] for i in range(0, len(files), size)]
 
 
+def split_by_time(pieces, target):
+    """In Teile von etwa `target` Sekunden aufteilen (Option „Teile à ca. 60 min“). -> Liste von Stück-Listen.
+    Geschnitten wird an Datei-/Kapitelgrenzen, jeweils an der Grenze, die der idealen Stelle am nächsten liegt.
+    Ein einzelnes Stück, das deutlich länger ist (> 1,5 × target), wird vorher in gleich lange Bereiche
+    zerlegt, sofern das geht (ffmpeg da, Format schneidbar, Dauer bekannt). Höchstens 99 Teile."""
+    can_cut = chapters.available()
+    out = []
+    for p in pieces:
+        dur = p.get("dur") or 0
+        if dur > 1.5 * target and can_cut and chapters.OUT_EXT.get(_ext(p["f"])):
+            k = round(dur / target)
+            s0 = p["start"] or 0.0
+            step = dur / k
+            for i in range(k):
+                e = s0 + step * (i + 1) if i + 1 < k else p["end"]
+                out.append({**p, "start": s0 + step * i, "end": e, "dur": step})
+        else:
+            out.append(p)
+    w = [p["dur"] or (p["f"].get("size") or 16000) / 16000 for p in out]
+    total = sum(w)
+    n = max(1, min(MAX_FILES, round(total / target), len(out)))
+    if n == 1:
+        return [out]
+    bounds, acc = [], 0.0  # bounds[j] = Hörzeit vor Stück j+1
+    for x in w[:-1]:
+        acc += x
+        bounds.append(acc)
+    cuts, prev = [], 0
+    for i in range(1, n):
+        ideal = total * i / n
+        lo, hi = prev + 1, len(out) - (n - i)  # jeder Teil mindestens ein Stück
+        j = min(range(lo, hi + 1), key=lambda j: abs(bounds[j - 1] - ideal))
+        cuts.append(j)
+        prev = j
+    edges = [0] + cuts + [len(out)]
+    return [out[a:b] for a, b in zip(edges, edges[1:])]
+
+
+def part_name(clean, k, n, short):
+    """Name einer Teil-TAF; Teilnummer mit führender Null (ab 10 Teilen), damit TeddyCloud richtig sortiert."""
+    return t("{clean} - Teil {k} von {n} [{mark}].taf", clean=clean, k=str(k).zfill(len(str(n))), n=n, mark=f"{short}-{k}")
+
+
+PARTS_OF = re.compile(r" (?:von|of) (\d{1,2}) \[[^\[\]/]{8}-\d{1,2}\]\.taf$", re.IGNORECASE)
+
+
 def nd_tracks(album):
     """Titel eines Navidrome-Albums in Abspielreihenfolge (CD, Titelnummer, sonst Reihenfolge der API)."""
     songs = [(i, s) for i, s in enumerate(album.get("song") or []) if not s.get("isDir")]
@@ -329,6 +375,7 @@ class Queue:
                     "mark": it.get("mark") or (self.fs.mark(it.get("lib"), it["id"]) if it.get("source") == "fs" else
                              id8(it["id"], it.get("source") or "abs", it.get("kind") or "album", it.get("songs"))),
                     "subfolder": sub, "split": bool(it.get("split")), "merge": bool(it.get("merge")),
+                    "parts_min": int(it.get("parts_min") or 0),
                     "folder": f"{self.cfg.tc_base}/{sub}" if sub else None,
                     "state": "waiting", "n": 0, "m": 0, "part": 0, "parts": 0, "error": None,
                     "taf": None, "check": None, "warning": None, "note": None,
@@ -483,14 +530,16 @@ class Queue:
 
         if not files:
             raise ApiError(t("keine Audiodateien"))
-        if len(files) > MAX_FILES and not (job["split"] or job.get("merge") or bundle):
+        by_time = bool(job.get("parts_min")) and not bundle
+        if len(files) > MAX_FILES and not (job["split"] or job.get("merge") or bundle or by_time):
             raise ApiError(t("{n} Audiodateien, TeddyCloud erlaubt max. {max} – nicht übertragen (weder Aufteilen noch "
                              "Zusammenfügen gewählt)", n=len(files), max=MAX_FILES))
 
         # Duplikatprüfung im ganzen Basisordner (auch wenn sich Serie/Ordner seither geändert hat)
         # auch in TC_BASE_EXTRA (z. B. alter Basisordner): dort nur suchen, nie schreiben
         bases = getattr(self.cfg, "tc_scan_bases", None) or (base,)
-        have = set().union(*(markers(scan_tree(self.tc, b)) for b in bases))
+        names = [n for b in bases for n in scan_tree(self.tc, b)]
+        have = markers(names)
         if short in have:
             for d, n in [hit for b in bases for hit in find_marker(self.tc, b, short)]:
                 h = self.tc.taf_header(d, n)
@@ -498,19 +547,35 @@ class Queue:
                     raise ApiError(t("in TeddyCloud liegt eine unvollständige TAF „{name}“ in {folder} (früher abgebrochen) – "
                                      "bitte dort löschen und das Hörbuch neu übertragen", name=n, folder=d))
             log.info("Auftrag %s: [%s] schon vorhanden", jid, short)
-            self._set(jid, state="skipped", finished=time.time())
+            self._set(jid, state="skipped", finished=time.time(),
+                      note=t("schon als eine TAF vorhanden (zum Aufteilen erst in TeddyCloud löschen)") if by_time else None)
             return
 
         clean = clean_name(numbered(title, seq))
         pieces = expand(files)
-        # Plan: [(TAF-Name, [Kapitel])], ein Kapitel = Liste von Stücken (ganze Dateien oder Kapitelbereiche)
-        if len(pieces) > MAX_FILES and job["split"] and not bundle:
+        chunks, split_note = None, None
+        if by_time:
+            chunks = split_by_time(pieces, job["parts_min"] * 60)
+            if len(chunks) == 1:
+                chunks = None
+                split_note = t("nicht aufgeteilt (kürzer als ca. {m} min)", m=round(job["parts_min"] * 1.5)) \
+                    if audio_secs(pieces) < job["parts_min"] * 90 else t("nicht aufteilbar (eine Datei ohne Kapitel)")
+        elif len(pieces) > MAX_FILES and job["split"] and not bundle:
             chunks = split_parts(pieces)
-            plan = [(t("{clean} - Teil {k} von {n} [{mark}].taf", clean=clean, k=k, n=len(chunks), mark=f"{short}-{k}"),
-                     [[p] for p in c])
+        # Plan: [(TAF-Name, [Kapitel])], ein Kapitel = Liste von Stücken (ganze Dateien oder Kapitelbereiche)
+        if chunks:
+            n = len(chunks)
+            prev_n = {int(m.group(1)) for x in names if (m := PARTS_OF.search(x)) and MARKER.search(x).group(1) == short}
+            if prev_n and prev_n != {n}:  # schon anders aufgeteilt: nicht mischen
+                raise ApiError(t("liegt in TeddyCloud schon in {old} Teilen vor, jetzt wären es {n} – nicht gemischt; "
+                                 "zum neu Aufteilen die vorhandenen Teile in TeddyCloud löschen",
+                                 old=", ".join(map(str, sorted(prev_n))), n=n))
+            plan = [(part_name(clean, k, n, short), merge_units(c) if len(c) > MAX_FILES else [[p] for p in c])
                     for k, c in enumerate(chunks, 1) if f"{short}-{k}" not in have]
+            if by_time:
+                split_note = t("in {n} Teile à ca. {m} min aufgeteilt", n=n, m=round(audio_secs(pieces) / n / 60))
             if not plan:
-                self._set(jid, state="skipped", finished=time.time())
+                self._set(jid, state="skipped", finished=time.time(), note=split_note)
                 return
         else:
             if any(h.startswith(short + "-") for h in have):
@@ -521,6 +586,8 @@ class Queue:
             plan = [(f"{clean} [{short}].taf", units)]
         nunits = sum(len(c) for _, c in plan)
         note = note_for(len({f.get("book", 0) for f in files}), len(files), len(pieces), nunits)
+        if split_note:
+            note = split_note + (f"; {note}" if note else "")
         if note:
             log.info("Auftrag %s: %s", jid, note)
         todo = [u for _, c in plan for u in c]

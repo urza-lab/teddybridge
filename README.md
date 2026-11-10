@@ -38,10 +38,21 @@ The queue lives in memory only. A restart discards pending jobs; this is intende
 A TAF can have at most 99 chapters (one source file = one chapter). With more files the UI asks:
 
 - **Merge** (default): a single TAF with 99 chapters. teddybridge repeatedly joins the two adjacent files with the shortest combined duration until 99 remain – so only the boundaries between the shortest chapters disappear. **MP3** is concatenated losslessly (no re-encoding, no extra tool); each merged file keeps the usual MP3 encoder gap of about 35 ms. **Other formats** (m4a, FLAC, Ogg …) and MP3 with differing sample rate or mono/stereo are joined with **ffmpeg** into one FLAC chapter (lossless relative to the source; TeddyCloud encodes to Opus afterwards anyway). Without ffmpeg, merging only works for uniform MP3.
-- **Split:** several TAFs `<title> - Part k of n [<id>-k].taf` (German: `Teil k von n`) with the same number of files each; if a part is missing later, only that part is transferred again.
+- **Split:** several TAFs `<title> - Part k of n [<id>-k].taf` (German: `Teil k von n`) with the same number of files each; if a part is missing later, only that part is transferred again. From 10 parts on, the number gets a leading zero (`Part 03 of 12`) so TeddyCloud sorts the parts correctly.
 - **Skip.**
 
 An audiobook counts as present in either form: if parts already exist, it is not merged in addition (and vice versa).
+
+### Parts of about 60 min (option, since 1.3)
+
+Tick “**in parts of 60 min**” next to the transfer button (remembered in the browser) to split long audiobooks into several TAFs of about one hour each, e.g. `<title> - Part 03 of 12 [<id>-3].taf`. This helps when switching between boxes (you lose at most the current part) and avoids the known issue that the box no longer saves the position in very long TAFs (more than about 3 h 10 min).
+
+- The number of parts is the total duration divided by 60 min, rounded (so an 80-min book stays **one** TAF, a 100-min book becomes 2 parts of 50 min).
+- Cuts are made at **file or chapter boundaries**, each at the boundary closest to the ideal point – so parts are roughly, not exactly, 60 min.
+- A single long file without usable boundaries (e.g. one 10-hour MP3) is cut into equal time ranges, losslessly with **ffmpeg** (included in the Docker image); without ffmpeg it stays one TAF.
+- More than 99 files within one part are merged as described above; the 99-file question does not appear.
+- Same markers as the 99-file split: missing parts are transferred again, existing ones skipped. If the book already exists as **one** TAF, it is skipped (delete it in TeddyCloud first to get parts). If it already exists in a **different number** of parts, teddybridge refuses instead of mixing two splits.
+- Not available for “as one TAF” collections.
 
 ### One file with chapters (m4b)
 
@@ -273,13 +284,15 @@ teddybridge is built for a **trusted local network**. Whoever can log in may rea
 
 ## Ideas for later versions
 
-- **Split long audiobooks into parts of about 60 min** (optional). Helps when switching between boxes (you lose at most the current part) and avoids the known issue that the box no longer saves the position for tracks longer than about 3 h 10 min.
+- Optional parallel processing in the queue (e.g. two jobs at once), since TeddyCloud encodes on a single CPU core.
 
 ### Deliberately not planned: listening progress across boxes / with Audiobookshelf
 
 Desirable, but not possible with today's means. The Toniebox stores the position only in a small internal memory of the **box** – not on the Tonie, not in the cloud – and does not report it to the server. TeddyCloud only replaces the server (own CA certificate, DNS); the box keeps running the original firmware. So neither TeddyCloud nor teddybridge can read the position or set it on another box.
 
 A CC3200 box patched via the Hackiebox bootloader does not change this either as of today: no such patch exists, and according to the developers there is hardly any room in memory; saving to the SD card would require a larger rework. Standalone custom firmwares (HackieboxNG for CC3200, TeddyBox for ESP32) are not yet ready for everyday use. Should one of them be able to report and restore the position in the future, a sync (also with ABS, then with write access only for progress) could be added.
+
+**Update 2026-11:** a CC3200 custom firmware in **alpha** ([Oaradla/teddycloud_cfw](https://github.com/Oaradla/teddycloud_cfw), planned to move into regular TeddyCloud later) already reports start/stop events, the current title and play/pause to TeddyCloud and allows remote control. Continuing a Tonie on another box is not possible yet, but the developer wants to try to implement it. If that lands in TeddyCloud, resuming across boxes would happen between box and TeddyCloud; teddybridge would only be involved for an optional sync with Audiobookshelf.
 
 ## License
 

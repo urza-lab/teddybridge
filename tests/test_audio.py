@@ -95,6 +95,43 @@ def main():
               and worker.note_for(1, 1, 12, 12) == "1 Datei in 12 Kapitel geschnitten"
               and worker.note_for(1, 5, 5, 5) is None
               and worker.note_for(2, 3, 3, 3) == "2 Hörbücher, 3 Kapitel", "Hinweistexte")
+        print("Teile à ca. 60 min")
+        H = 3600
+        mp = lambda d: {"ext": "mp3", "dur": d, "book": 0}  # noqa: E731
+        lens = lambda cs: [round(sum(p["dur"] for p in c) / 60) for c in cs]  # noqa: E731
+        check(len(worker.split_by_time(worker.expand([mp(600)] * 8), H)) == 1, "80 min: bleibt eine TAF")
+        cs = worker.split_by_time(worker.expand([mp(600)] * 25), H)
+        check(len(cs) == 4 and sum(len(c) for c in cs) == 25 and lens(cs) == [60, 60, 70, 60],
+              "250 min aus 10-min-Dateien: 4 Teile, an Dateigrenzen nahe 60 min")
+        cs = worker.split_by_time(worker.expand([mp(3000), mp(3000), mp(600), mp(4800)]), H)
+        check(lens(cs) == [50, 60, 80], "190 min (50/50/10/80): 3 Teile, Schnitt an der jeweils nächsten Grenze")
+        fa = {"ext": "mp3", "dur": 4 * H + 600, "book": 0}
+        real = chapters.available
+        chapters.available = lambda: True
+        try:
+            cs = worker.split_by_time(worker.expand([fa]), H)
+            rs = [(round(c[0]["start"]), c[0]["end"] and round(c[0]["end"])) for c in cs]
+            check(len(cs) == 4 and rs[0] == (0, 3750) and rs[-1] == (11250, None),
+                  "eine lange Datei: in 4 gleich lange Bereiche geschnitten, letzter bis Dateiende")
+            m4 = {"ext": "m4b", "dur": 3 * H, "chapters": [(i * 600.0, (i + 1) * 600.0) for i in range(18)], "book": 0}
+            cs = worker.split_by_time(worker.expand([m4]), H)
+            check(len(cs) == 3 and [len(c) for c in cs] == [6, 6, 6], "m4b: an Kapitelgrenzen in 3 Teile")
+            cs = worker.split_by_time(worker.expand([mp(30)] * 400), H)
+            check(len(cs) == 3 and all(len(c) > 99 for c in cs) and all(len(worker.merge_units(c)) <= 99 for c in cs),
+                  "viele kurze Dateien: je Teil > 99 Stücke, Zusammenfügen pro Teil")
+        finally:
+            chapters.available = real
+        chapters.available = lambda: False
+        try:
+            check(len(worker.split_by_time(worker.expand([fa]), H)) == 1, "ohne ffmpeg: eine lange Datei bleibt ganz")
+        finally:
+            chapters.available = real
+        check(worker.part_name("Buch", 3, 12, "abcd1234") == "Buch - Teil 03 von 12 [abcd1234-3].taf"
+              and worker.part_name("Buch", 2, 2, "abcd1234") == "Buch - Teil 2 von 2 [abcd1234-2].taf",
+              "Teil-Namen: führende Null ab 10 Teilen, Kennzeichen ohne")
+        check(worker.markers(["Buch - Teil 03 von 12 [abcd1234-3].taf"]) == {"abcd1234-3"}, "Kennzeichen erkannt")
+        check(worker.PARTS_OF.search("Buch - Part 03 of 12 [abcd1234-3].taf").group(1) == "12", "Teilzahl (EN) erkannt")
+
         real = chapters.available
         chapters.available = lambda: False
         try:

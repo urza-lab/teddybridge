@@ -390,6 +390,38 @@ print("RESULT" + json.dumps(out))
         jc = wait_jobs(c, 1)[0]
         check(jc["state"] == "done" and jc["parts"] == 1 and jc["m"] == 50 and os.path.exists(p2), "fehlender Teil wird nachgeholt, vorhandener nicht doppelt")
 
+        print("Teile nach Dauer")
+        r = c.post("/api/jobs", json={"items": [{"id": C, "parts_min": 60, "split": True}]})
+        check(r.status_code == 422, "Teile nach Dauer + Aufteilen: abgelehnt")
+        r = c.post("/api/jobs", json={"bundle": "X", "items": [{"id": C, "parts_min": 60}, {"id": A}]})
+        check(r.status_code == 422, "Teile nach Dauer in Sammel-TAF: abgelehnt")
+        c.post("/api/jobs/clear")
+        c.post("/api/jobs", json={"items": [{"id": C, "parts_min": 60}]})
+        jc = wait_jobs(c, 1)[0]
+        check(jc["state"] == "skipped" and "2 Teile" in (jc["note"] or ""), "100 min à 60: gleiche 2 Teile schon da -> übersprungen")
+        c.post("/api/jobs/clear")
+        c.post("/api/jobs", json={"items": [{"id": C, "parts_min": 30}]})
+        jc = wait_jobs(c, 1)[0]
+        check(jc["state"] == "error" and "2 Teilen" in jc["error"] and "3" in jc["error"], "andere Teilzahl: nicht gemischt, Fehler")
+        os.remove(p1), os.remove(p2)
+        c.post("/api/jobs/clear")
+        c.post("/api/jobs", json={"items": [{"id": C, "parts_min": 30}]})
+        jc = wait_jobs(c, 1)[0]
+        q = [os.path.join(K, "Test", f"Zu viele Dateien - Teil {k} von 3 [cccc3333-{k}].taf") for k in (1, 2, 3)]
+        check(jc["state"] == "done" and jc["parts"] == 3 and all(os.path.exists(x) for x in q), "100 min à 30: 3 Teil-TAFs")
+        check(os.path.exists(q[2]) and [len(taf_lines(x)) for x in q] == [33, 34, 33]
+              and sum((taf_lines(x) for x in q), []) == [f"AUDIO {C} {i}" for i in range(1, 101)], "Teile lückenlos in Reihenfolge")
+        check("3 Teile" in (jc["note"] or ""), "Hinweis in der Warteschlange")
+        c.post("/api/jobs/clear")
+        c.post("/api/jobs", json={"items": [{"id": A, "parts_min": 60}]})
+        ja = wait_jobs(c, 1)[0]
+        check(ja["state"] == "skipped" and "eine TAF" in (ja["note"] or ""), "schon als ganze TAF da: übersprungen mit Hinweis")
+        for x in q:
+            os.remove(x)
+        c.post("/api/jobs/clear")
+        c.post("/api/jobs", json={"items": [{"id": C, "split": True}]})
+        check(wait_jobs(c, 1)[0]["state"] == "done" and os.path.exists(p1) and os.path.exists(p2), "Zustand für folgende Tests wiederhergestellt")
+
         print("Eigener Unterordner und Duplikate")
         c.post("/api/jobs/clear")
         # A umbenennen und verschieben (z. B. nach Neu-Match) -> trotzdem Duplikat
@@ -414,10 +446,10 @@ print("RESULT" + json.dumps(out))
               f"Summe nur bei Stapeln mit mehreren Aufträgen {[m for m in msgs if m.startswith('📦')]}")
         ok_msgs = [m for m in msgs if m.startswith("✅")]
         err_msgs = [m for m in msgs if m.startswith("❌")]
-        check(len(ok_msgs) == 6 and all("Kapitel" in m and "📁 " + BASE in m for m in ok_msgs),
+        check(len(ok_msgs) == 8 and all("Kapitel" in m and "📁 " + BASE in m for m in ok_msgs),
               f"pro fertigem Auftrag eine Meldung mit Kapiteln/Dauer und Ordner ({len(ok_msgs)})")
-        check(len(err_msgs) == 2 and all("fehlgeschlagen:" in m for m in err_msgs), f"pro Fehler eine Meldung mit Grund ({len(err_msgs)})")
-        check(len(msgs) == 10, f"übersprungene ohne eigene Meldung (insgesamt {len(msgs)})")
+        check(len(err_msgs) == 3 and all("fehlgeschlagen:" in m for m in err_msgs), f"pro Fehler eine Meldung mit Grund ({len(err_msgs)})")
+        check(len(msgs) == 13, f"übersprungene ohne eigene Meldung (insgesamt {len(msgs)})")
         check(all(m.get("allowed_mentions") == {"parse": []} for m in raw), "keine @-Erwähnungen aus Titeln")
 
         print("Leere Uploads")

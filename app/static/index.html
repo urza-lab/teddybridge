@@ -96,6 +96,7 @@ h3.sub{margin:22px 0 8px;font-size:15px;color:var(--mut)}
   <span id="customWrap" hidden><span class="base" id="baseLbl">…</span>/<input id="folder" spellcheck="false" placeholder="z. B. Weihnachten"></span>
   <span id="bundleWrap" hidden><label title="Alle ausgewählten Hörbücher nacheinander in eine einzige TAF, in der Reihenfolge der Auswahl"><input type="checkbox" id="bundle"> als eine TAF</label>
     <input id="bundleName" spellcheck="false" placeholder="Name der TAF" maxlength="120" hidden></span>
+  <label id="partsWrap" title="Lange Hörbücher in mehrere TAFs von etwa 60 min aufteilen („Teil 01 von 12“), geschnitten an Datei- bzw. Kapitelgrenzen. Unter ca. 90 min bleibt es eine TAF."><input type="checkbox" id="parts"> in Teile à 60 min</label>
   <button id="send" class="primary" disabled>Nach TeddyCloud (0)</button>
   <button id="none">Auswahl leeren</button>
   <span id="msg"></span>
@@ -139,7 +140,8 @@ const EN = {
   'Abmelden':'Log out', 'Einstellungen':'Settings', 'Ablage':'Destination', 'Automatisch':'Automatic', 'Eigener Unterordner':'Custom subfolder',
   'z. B. Weihnachten':'e.g. Christmas',
   'Alle ausgewählten Hörbücher nacheinander in eine einzige TAF, in der Reihenfolge der Auswahl':'All selected audiobooks one after another in a single TAF, in the order of selection',
-  'als eine TAF':'as one TAF', 'Name der TAF':'Name of the TAF', 'Auswahl leeren':'Clear selection',
+  'als eine TAF':'as one TAF', 'in Teile à 60 min':'in parts of 60 min',
+  'Lange Hörbücher in mehrere TAFs von etwa 60 min aufteilen („Teil 01 von 12“), geschnitten an Datei- bzw. Kapitelgrenzen. Unter ca. 90 min bleibt es eine TAF.':'Split long audiobooks into several TAFs of about 60 min (“Part 01 of 12”), cut at file or chapter boundaries. Below about 90 min it stays one TAF.', 'Name der TAF':'Name of the TAF', 'Auswahl leeren':'Clear selection',
   'Eigene Playlist':'Custom playlist', 'Name der Playlist':'Playlist name', 'Als eine TAF nach TeddyCloud':'To TeddyCloud as one TAF',
   'Leeren':'Clear', 'Liste':'List', 'Mehr laden':'Load more', 'Nichts gefunden.':'Nothing found.',
   'Mehr als 99 Dateien':'More than 99 files',
@@ -376,6 +378,7 @@ function markTiles(){
   }
   const n=st.sel.size; $('#send').textContent=T('Nach TeddyCloud ({n})',{n}); $('#send').disabled=!n||st.readonly;
   $('#bundleWrap').hidden=n<2; const bundle=n>=2&&$('#bundle').checked; $('#bundleName').hidden=!bundle;
+  $('#partsWrap').hidden=bundle;
   if(bundle) $('#send').textContent=T('Als eine TAF ({n})',{n});
   const order=[...st.sel.keys()];  // Reihenfolge der Sammel-TAF = Reihenfolge der Auswahl
   for(const t of document.querySelectorAll('.tile[data-id]')){
@@ -464,7 +467,8 @@ async function send(){
   let items=[...st.sel.values()].map(it=>({id:it.id,title:it.title,files:it.files,source:it.source||'abs',lib:it.lib,kind:it.kind||'album'}));
   const bundle=items.length>=2&&$('#bundle').checked?$('#bundleName').value.trim():null;
   if(items.length>=2&&$('#bundle').checked&&!bundle){ msg(T('Bitte einen Namen für die TAF angeben.')); $('#bundleName').focus(); return; }
-  const big=bundle?[]:items.filter(it=>it.files>st.max);  // Sammel-TAF: über 99 Kapitel wird automatisch zusammengefügt
+  const parts=!bundle&&$('#parts').checked;  // Teile à 60 min: über 99 Dateien wird je Teil automatisch zusammengefügt
+  const big=bundle||parts?[]:items.filter(it=>it.files>st.max);  // Sammel-TAF: über 99 Kapitel wird automatisch zusammengefügt
   let split=false, merge=false;
   if(big.length){
     const choice=await askBig(big);
@@ -472,7 +476,7 @@ async function send(){
     if(choice==='skip') items=items.filter(it=>!(it.files>st.max)); else if(choice==='merge') merge=true; else split=true;
     if(!items.length){ msg(T('Nichts zu übertragen.')); return; }
   }
-  items=items.map(it=>({id:it.id,title:it.title,source:it.source,kind:it.kind,lib:(it.source==='nd'||it.source==='fs')?String(it.lib):null,split:split&&it.files>st.max,merge:merge&&it.files>st.max}));
+  items=items.map(it=>({id:it.id,title:it.title,source:it.source,kind:it.kind,lib:(it.source==='nd'||it.source==='fs')?String(it.lib):null,split:split&&it.files>st.max,merge:merge&&it.files>st.max,parts_min:parts?60:0}));
   $('#send').disabled=true; msg('');
   try{ await api('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subfolder,items,bundle})});
        $('#bundle').checked=false; $('#bundleName').value=''; st.sel.clear(); markTiles(); $('#queue').dataset.closed='0'; $('#queue').hidden=false; poll(); }
@@ -528,6 +532,8 @@ $('#sort').onchange=e=>{store('sort',e.target.value); $('#q').value=''; st.q='';
 $('#more').onclick=()=>{st.page++; loadPage();};
 let qTimer; $('#q').oninput=e=>{clearTimeout(qTimer); qTimer=setTimeout(()=>search(e.target.value.trim()),350);};
 $('#bundle').onchange=()=>{markTiles(); if($('#bundle').checked) $('#bundleName').focus();};
+try{ $('#parts').checked=localStorage.getItem('tb_parts')==='1'; }catch(e){}
+$('#parts').onchange=()=>{ try{ localStorage.setItem('tb_parts',$('#parts').checked?'1':'0'); }catch(e){} };
 $('#mode').onchange=e=>{$('#customWrap').hidden=e.target.value!=='custom'; if(!$('#customWrap').hidden) $('#folder').focus();};
 $('#send').onclick=send;
 $('#mixSend').onclick=sendMix;

@@ -83,6 +83,18 @@ EN = {
     "interner Fehler ({name})": "internal error ({name})",
     "„{title}“: keine Audiodateien": "“{title}”: no audio files",
     "keine Audiodateien": "no audio files",
+    "schon als eine TAF vorhanden (zum Aufteilen erst in TeddyCloud löschen)":
+        "already present as one TAF (delete it in TeddyCloud first to split it)",
+    "nicht aufgeteilt (kürzer als ca. {m} min)": "not split (shorter than about {m} min)",
+    "nicht aufteilbar (eine Datei ohne Kapitel)": "cannot be split (one file without chapters)",
+    "in {n} Teile à ca. {m} min aufgeteilt": "split into {n} parts of about {m} min",
+    "liegt in TeddyCloud schon in {old} Teilen vor, jetzt wären es {n} – nicht gemischt; "
+    "zum neu Aufteilen die vorhandenen Teile in TeddyCloud löschen":
+        "already in TeddyCloud as {old} parts, now it would be {n} – not mixed; "
+        "delete the existing parts in TeddyCloud to split it again",
+    "entweder Teile nach Dauer oder Aufteilen/Zusammenfügen": "either parts by duration or split/merge",
+    "eine Sammel-TAF kann nicht nach Dauer aufgeteilt werden": "a combined TAF cannot be split by duration",
+    "Teile nach Dauer: mindestens 10 min": "parts by duration: at least 10 min",
     "{n} Audiodateien, TeddyCloud erlaubt max. {max} – nicht übertragen (weder Aufteilen noch Zusammenfügen gewählt)":
         "{n} audio files, TeddyCloud allows at most {max} – not transferred (neither split nor merge chosen)",
     "in TeddyCloud liegt eine unvollständige TAF „{name}“ in {folder} (früher abgebrochen) – bitte dort löschen und das Hörbuch neu übertragen":
