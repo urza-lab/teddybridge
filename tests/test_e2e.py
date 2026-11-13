@@ -1027,6 +1027,22 @@ for path in ("/", "/login", "/api/config"):
         j = transfer_a()
         l2 = wa(enabled=True)
         check(j["state"] == "done" and l2 - l1 == 1, f"nach Neustart von TeddyCloud neu angemeldet ({j['state']}, {l2 - l1} Anmeldungen)")
+        # teddycloud_cfw: Token nur mit wantToken bzw. als (__Host-)Cookie; Ablehnungen mit Grund
+        drop_taf(A[:8])
+        wa(enabled=True, reset=True, cfw=True)
+        j = transfer_a()
+        l2 = wa(enabled=True, cfw=True)
+        check(j["state"] == "done", f"teddycloud_cfw-Anmeldung (Token mit wantToken) ({j['state']}, {j.get('error')})")
+        wa(enabled=True, reset=True, cfw=True, deny="forbidden")
+        r = c.get("/api/libraries/lib_kids/items?page=0&limit=5")  # ABS unabhängig von TeddyCloud
+        check(r.status_code == 200, "Ablehnung durch TeddyCloud stört Audiobookshelf nicht")
+        drop_taf(A[:8])
+        j = transfer_a()
+        check(j["state"] == "error" and "Berechtigung" in (j["error"] or ""), f"cfw „forbidden“: verständliche Meldung ({j['state']}, {j.get('error')})")
+        wa(enabled=True, reset=True, cfw=True, deny="2fa_setup_required")
+        j = transfer_a()
+        check(j["state"] == "error" and "Zwei-Faktor" in (j["error"] or ""), f"cfw „2fa_setup_required“: verständliche Meldung ({j.get('error')})")
+        l2 = wa(enabled=True, reset=True)
         probe = r'''
 from app import config, clients
 cfg = config.load(); tc = clients.Tc(cfg)

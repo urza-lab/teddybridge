@@ -31,6 +31,40 @@ def _err(service, what, r: httpx.Response):
     return ApiError(f"{service} {what}: HTTP {r.status_code} {text}".strip())
 
 
+# Ablehnungen der neueren TeddyCloud-Anmeldung (teddycloud_cfw: Benutzer mit Rechten, 2FA, Heimnetz-Sperre).
+# Schlüssel = Feld "error" der JSON-Antwort (HTTP 403).
+TC_DENIED = {
+    "2fa_setup_required": "TeddyCloud: Für diesen Benutzer ist Zwei-Faktor-Anmeldung vorgeschrieben – für teddybridge einen eigenen Benutzer ohne 2FA anlegen",
+    "password_change_required": "TeddyCloud: Der Benutzer muss zuerst sein Passwort ändern – einmal in der TeddyCloud-Oberfläche anmelden, dann das neue Passwort in teddybridge eintragen",
+    "forbidden": "TeddyCloud: Dem Benutzer fehlt eine Berechtigung (Bibliothek lesen/schreiben/umwandeln, Tonies) – in TeddyCloud unter Benutzer anpassen",
+    "lan_only": "TeddyCloud: Der Benutzer darf sich nur aus dem Heimnetz anmelden, und teddybridge zählt nicht dazu – Adresse von teddybridge in web_auth.lan_networks aufnehmen",
+    "cross_site": "TeddyCloud: Anfrage als „cross-site“ abgelehnt",
+}
+
+
+def tc_denied(r):
+    """Bekannte TeddyCloud-Ablehnung als ApiError, sonst None."""
+    if r.status_code != 403:
+        return None
+    try:
+        code = (r.json() or {}).get("error")
+    except (ValueError, AttributeError):
+        return None
+    msg = TC_DENIED.get(code) if isinstance(code, str) else None
+    return ApiError(t(msg)) if msg else None
+
+
+def _session_cookie(r, names):
+    """Session-Token aus Set-Cookie (auch __Host-…, das httpx bei http:// verwerfen würde)."""
+    for h in r.headers.get_list("set-cookie"):
+        name, _, rest = h.partition("=")
+        if name.strip() in names:
+            val = rest.split(";", 1)[0].strip()
+            if val:
+                return val
+    return None
+
+
 def check_id(item_id: str) -> str:
     if not ID_RE.match(item_id or ""):
         raise ApiError(t("ungültige ID"))
@@ -266,18 +300,32 @@ class Tc:
             if time.time() - self._login_failed < self.LOGIN_BACKOFF:
                 raise ApiError(t("TeddyCloud: Anmeldung abgelehnt (TC_AUTH prüfen)"))
             try:
-                r = self.c.post("/api/auth/login", json={"username": self._creds[0], "password": self._creds[1]},
-                                timeout=30.0)
+                # wantToken: teddycloud_cfw gibt das Token sonst nur als Cookie zurück (das originale TeddyCloud
+                # ignoriert das Feld und schickt es immer mit)
+                r = self.c.post("/api/auth/login", json={"username": self._creds[0], "password": self._creds[1],
+                                                         "wantToken": True}, timeout=30.0)
             except httpx.HTTPError as e:
                 raise ApiError(t("TeddyCloud {what}: Verbindungsfehler ({name})", what=t("Anmeldung"), name=type(e).__name__)) from None
             finally:
                 self.c.cookies.clear()  # Set-Cookie nicht übernehmen, das Token wird selbst mitgeschickt
-            token = None
+            token, body = None, {}
             if r.status_code == 200:
                 try:
-                    token = r.json().get("token")
-                except ValueError:
+                    body = r.json() or {}
+                    token = body.get("token")
+                except (ValueError, AttributeError):
                     token = None
+                if not token:
+                    token = _session_cookie(r, (self.SESSION_COOKIE, "__Host-" + self.SESSION_COOKIE))
+            if r.status_code == 200 and not token and isinstance(body, dict) and body.get("challenge"):
+                self._session = None
+                self._login_failed = time.time()
+                raise ApiError(t("TeddyCloud: Für diesen Benutzer ist Zwei-Faktor-Anmeldung aktiv – für teddybridge einen eigenen Benutzer ohne 2FA anlegen"))
+            denied = tc_denied(r)
+            if denied:
+                self._session = None
+                self._login_failed = time.time()
+                raise denied
             if not token or not isinstance(token, str) or not token.isalnum():
                 self._session = None
                 if r.status_code == 429:
@@ -323,6 +371,9 @@ class Tc:
                 log.warning("TeddyCloud %s: %s, Versuch %d/%d", what, type(e).__name__, attempt, tries)
             else:
                 if r.status_code not in self.RETRY_STATUS or attempt == tries:
+                    denied = tc_denied(r)
+                    if denied:
+                        raise denied
                     return r
                 log.warning("TeddyCloud %s: HTTP %s, Versuch %d/%d", what, r.status_code, attempt, tries)
             time.sleep(min(2 * attempt, 8))

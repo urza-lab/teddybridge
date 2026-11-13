@@ -9,7 +9,7 @@ TC-Mock:   Bibliothek = Verzeichnis --data. fileEncode schreibt eine Fake-TAF (I
 Discord:   POST /_mock/discord/<beliebig> sammelt Webhook-Meldungen, GET /_mock/discord liefert sie.
 Leer-Upload: POST /_mock/empty-uploads {"match": "<teil des pfads>", "mode": "once"|"always"} lässt
            fileUpload trotz 200 OK eine leere Datei anlegen (once: nur beim ersten Upload je Datei).
-Web-Auth:  POST /_mock/web-auth {"enabled": true|false, "reset": true} schaltet die TeddyCloud-eigene Anmeldung
+Web-Auth:  POST /_mock/web-auth {"enabled": true|false, "reset": true, "cfw": true, "deny": "<code>"} schaltet die TeddyCloud-eigene Anmeldung
            (POST /api/auth/login, Cookie tc_web_session, 401 ohne WWW-Authenticate) ein/aus; reset = alle
            Sitzungen ungültig (wie ein Neustart von TeddyCloud). Benutzer:Passwort = --tc-auth.
 ND-Mock:   Navidrome/Subsonic, Benutzer "nduser", Passwort "ndpassword55" (nur Token-Anmeldung t/s), nur GET.
@@ -277,6 +277,8 @@ class TcHandler(Base):
     web_auth = False
     sessions = set()
     logins = 0
+    cfw = False   # wie teddycloud_cfw: Token im Body nur mit wantToken, sonst nur als Cookie
+    deny = None   # cfw-Ablehnung für alle API-Aufrufe nach der Anmeldung, z. B. "forbidden"
     # Tonie-Figuren wie /api/getTagIndex (content/<ruid[:8]>/<ruid[8:]>.json in echt)
     tags = {
         "e00403500aaa0001": {"type": "tag", "source": "", "live": False, "nocloud": False, "hide": False,
@@ -359,6 +361,9 @@ class TcHandler(Base):
             ck = self.headers.get("Cookie") or ""
             tok = next((c.split("=", 1)[1] for c in ck.replace(" ", "").split(";") if c.startswith("tc_web_session=")), None)
             if tok in TcHandler.sessions:
+                if TcHandler.deny:
+                    self.send(403, {"error": TcHandler.deny, "message": "denied (mock)"})
+                    return False
                 return True
             self.send(401, {"error": "unauthorized", "message": "Login required"})
             return False
@@ -383,6 +388,8 @@ class TcHandler(Base):
         if u.path == "/_mock/web-auth":
             cfg = json.loads(self.body() or b"{}")
             TcHandler.web_auth = bool(cfg.get("enabled"))
+            TcHandler.cfw = bool(cfg.get("cfw"))
+            TcHandler.deny = cfg.get("deny")
             if cfg.get("reset"):
                 TcHandler.sessions.clear()
             return self.send(200, {"logins": TcHandler.logins})
@@ -397,6 +404,11 @@ class TcHandler(Base):
             import secrets
             tok = secrets.token_hex(32)
             TcHandler.sessions.add(tok)
+            if TcHandler.cfw:
+                body = {"ok": True, "username": cred["username"], "twoFactorSetupRequired": False}
+                if cred.get("wantToken") is True:
+                    body["token"] = tok
+                return self.send(200, body, headers={"Set-Cookie": f"__Host-tc_web_session={tok}; Path=/; HttpOnly; Secure; SameSite=Strict"})
             return self.send(200, {"ok": True, "username": cred["username"], "token": tok})
         if u.path == "/_mock/encode-delay":
             TcHandler.encode_delay = float(json.loads(self.body() or b"{}").get("secs", 0.5))
