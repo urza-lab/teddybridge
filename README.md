@@ -2,7 +2,7 @@
 
 A web UI to browse audiobooks, radio plays and music from **Audiobookshelf**, **Navidrome** or a **NAS folder** and transfer them with one click as **TAF files** into the library of **[TeddyCloud](https://github.com/toniebox-reverse-engineering/teddycloud)**. Afterwards you can assign a TAF to one of your existing Tonie figures right in teddybridge, or in TeddyCloud as usual.
 
-> **Languages:** The user interface is available in **English and German** – it follows the browser language and can be switched in the header, or pinned with `UI_LANG`. Logs are in German.
+> **Languages:** The user interface is available in **English and German** – it follows the browser language (inside TeddyCloud: TeddyCloud's language, since 1.6) and can be switched in the ⋯ menu, or pinned with `UI_LANG`. Logs are in German.
 
 ---
 
@@ -30,9 +30,20 @@ A web UI to browse audiobooks, radio plays and music from **Audiobookshelf**, **
 4. **Placement:** automatically `TC_BASE/<library>/<series or author>` (Audiobookshelf), `TC_BASE/<music folder>/<album artist>` or `TC_BASE/Playlists` (Navidrome), `TC_BASE/<share>/<folder path>` (file source), or a subfolder of your choice.
 5. **Progress:** The queue in the browser shows a bar, percentage and estimated remaining time with clock time per job. While downloading, the estimate comes from the current speed; while encoding – TeddyCloud reports no progress – from the growing TAF file (TeddyCloud writes steadily about 0.65 MB per minute of audio, about 17× real time). teddybridge refines both values after every finished job.
 6. **Assign to a Tonie** (since 1.5): see [below](#assign-to-a-tonie).
-7. **Notifications:** optionally via Discord webhook per job – ✅ done (chapters, duration, folder) or ❌ error with reason; for batches of several jobs also a summary (transferred, skipped, errors). Mentions (`@everyone` etc. in titles) are disabled.
+7. **Phone-friendly UI** (since 1.6): see [Using it on a phone](#using-it-on-a-phone).
+8. **Notifications:** optionally via Discord webhook per job – ✅ done (chapters, duration, folder) or ❌ error with reason; for batches of several jobs also a summary (transferred, skipped, errors). Mentions (`@everyone` etc. in titles) are disabled.
 
 The queue lives in memory only. A restart discards pending jobs; this is intended.
+
+### Using it on a phone
+
+Since 1.6 the UI is laid out for phones first, also inside TeddyCloud (web v1 and the new web v2):
+
+- A compact header: library picker (source and library), search with a sort button, *All / Series / Collections* and a “**new only**” filter that hides what is already in TeddyCloud. The header slides away while scrolling down.
+- Tap tiles to select them; an empty circle means not selected. Series, collections, search results and folders have “**Select all**” (skips items already in TeddyCloud). More items load while scrolling.
+- With a selection, a bar at the bottom shows the count and total duration. **Next** opens the “To TeddyCloud” sheet: review the list, destination, “as one TAF”, “Assign to a Tonie afterwards”, and under *Advanced* the options for parts and chapters, each with its explanation.
+- The queue opens from the header button (spinner and number of open jobs); running jobs come first. Tiles show “in progress” while queued and “in TC” when done.
+- Inside TeddyCloud, teddybridge follows TeddyCloud's **light/dark theme** and **language** (unless `UI_LANG` is set), and fills the visible height above web v2's bottom tab bar. The ⋯ menu has settings, language, log out and “Open in its own window”.
 
 ### More than 99 files
 
@@ -46,7 +57,7 @@ An audiobook counts as present in either form: if parts already exist, it is not
 
 ### Parts of about 60 min (option, since 1.3)
 
-Tick “**in parts of 60 min**” next to the transfer button (remembered in the browser) to split long audiobooks into several TAFs of about one hour each, e.g. `<title> - Part 03 of 12 [<id>-3].taf`. This helps when switching between boxes (you lose at most the current part) and avoids the known issue that the box no longer saves the position in very long TAFs (more than about 3 h 10 min).
+Tick “**In parts of 60 min**” under *Advanced* in the “To TeddyCloud” sheet (remembered in the browser) to split long audiobooks into several TAFs of about one hour each, e.g. `<title> - Part 03 of 12 [<id>-3].taf`. This helps when switching between boxes (you lose at most the current part) and avoids the known issue that the box no longer saves the position in very long TAFs (more than about 3 h 10 min).
 
 - The number of parts is the total duration divided by 60 min, rounded (so an 80-min book stays **one** TAF, a 100-min book becomes 2 parts of 50 min).
 - Cuts are made at **file or chapter boundaries**, each at the boundary closest to the ideal point – so parts are roughly, not exactly, 60 min.
@@ -61,7 +72,7 @@ If **ffmpeg** is installed (optional), an audiobook consisting of a single file 
 
 ### Chapters for files without chapter marks (option, since 1.4)
 
-A long file without chapter marks (e.g. a 10-hour MP3) normally becomes a TAF with a single chapter, so you cannot skip on the box. Enter a number in “**Chapters every … min**” next to the transfer button (3–120, empty = off, remembered in the browser): such files then get a chapter about every that many minutes.
+A long file without chapter marks (e.g. a 10-hour MP3) normally becomes a TAF with a single chapter, so you cannot skip on the box. Enter a number in “**Chapters every … min**” under *Advanced* in the “To TeddyCloud” sheet (3–120, empty = off, remembered in the browser): such files then get a chapter about every that many minutes.
 
 - Only files **without** chapter marks are touched, and only if they are longer than 1.5 × the interval; real chapters (m4b, ABS metadata) and normal multi-file audiobooks stay as they are.
 - Each cut is moved to the nearest **pause** (silence of at least 0.4 s below −35 dB, found with ffmpeg `silencedetect`), at most 3 min or a quarter of the interval away, so a chapter does not end mid-sentence. If there is no pause nearby, the cut stays at the exact time. The queue shows how many cuts landed in a pause.
@@ -72,11 +83,17 @@ A long file without chapter marks (e.g. a 10-hour MP3) normally becomes a TAF wi
 
 ### Several audiobooks in one TAF
 
-With two or more selected items you can choose “**as one TAF**” with a name of your choice. All items – even from different sources (ABS, Navidrome, file source) – end up in one TAF **in the order you selected them** (the tiles then show 1, 2, 3 …); each audiobook keeps its chapters. If together they exceed 99 chapters, they are merged automatically, but across the boundary between two audiobooks only if there is no other way. Placement: `TC_BASE/Collections` (German UI: `Sammlungen`) or your own subfolder. Marker `k` + hash over the selection: the same selection in the same order is skipped, even under a different name.
+With two or more selected items you can choose “**as one TAF**” with a name of your choice. All items – even from different sources (ABS, Navidrome, file source) – end up in one TAF **in the order you selected them** (the tiles then show 1, 2, 3 …; reorder with ↑↓ in the sheet); each audiobook keeps its chapters. If together they exceed 99 chapters, they are merged automatically, but across the boundary between two audiobooks only if there is no other way. Placement: `TC_BASE/Collections` (German UI: `Sammlungen`) or your own subfolder. Marker `k` + hash over the selection: the same selection in the same order is skipped, even under a different name.
 
 ### Assign to a Tonie
 
-Finished (or skipped, i.e. already present) jobs in the queue get a button **“Assign to Tonie”** (one per part for split books). It opens the list of figures TeddyCloud knows (picture, name, current assignment, searchable). After picking a figure, a confirmation shows what it plays now and what it will play; only then is it changed.
+Three places offer this:
+
+- **Tiles already in TeddyCloud** (since 1.6) have a “**Tonie**” button. With several TAFs for one item (parts, or the same TAF in the old base folder) you pick which one first.
+- **When sending** (since 1.6): if exactly one TAF results, the “To TeddyCloud” sheet has “**Assign to a Tonie afterwards**”. The figure is reserved together with the job (see below).
+- **Finished** (or skipped, i.e. already present) jobs in the queue have a button **“Assign to Tonie”** (one per part for split books).
+
+Each opens the list of figures TeddyCloud knows (picture, name, current assignment, searchable). After picking a figure, a confirmation shows what it plays now and what it will play; only then is it changed.
 
 - Same API calls as TeddyCloud's own web UI: `POST /content/json/set/<ruid>` with `source=lib://<path>`, plus `nocloud=true` (if not set yet) and `live=false` (if it was on). Nothing else is touched (name, model, hide, claimed …).
 - Only **existing** figures (no new tags, no system tags) and only TAFs below teddybridge's own base folder(s) that actually exist.
@@ -255,7 +272,7 @@ If your own compose lacks the `plugins` volume, a copied plugin would be gone af
 
 Copy the folder `plugin/teddybridge` to `<teddycloud-data>/www/plugins/`.
 
-If the browser does not allow the redirect without a click, an “Open teddybridge” button stays. The plugin follows the browser language (German or English).
+If the browser does not allow the redirect without a click, an “Open teddybridge” button stays. The plugin follows TeddyCloud's language (German or English; otherwise the browser language) and passes it and the light/dark theme on to teddybridge (plugin 1.2, works with TeddyCloud web v1 and v2).
 
 ## Tests
 
@@ -265,7 +282,7 @@ venv/bin/python tests/test_audio.py   # MP3 merging, m4b chapters, parts and pau
 venv/bin/python tests/test_setup.py   # setup and settings page: one-time codes, tests, saving, restart
 ```
 
-Starts mock servers for Audiobookshelf, Navidrome and TeddyCloud (`mock/`) plus a simulated NAS directory and checks login, browsing, transfer, duplicates, splitting, merging (verified byte by byte, or every chapter decoded and measured), m4b chapters (ABS and file source), parts of about 60 min, chapters cut in pauses, multi-audiobook TAFs, assigning and reserving Tonies (including refusals and that nothing changes then), starting with only one source, both languages, cleanup on errors, path escapes, security headers, and that **no secret appears in the log or UI**. Passwords in tests and mocks are made up.
+Starts mock servers for Audiobookshelf, Navidrome and TeddyCloud (`mock/`) plus a simulated NAS directory and checks login, browsing, transfer, duplicates, splitting, merging (verified byte by byte, or every chapter decoded and measured), m4b chapters (ABS and file source), parts of about 60 min, chapters cut in pauses, multi-audiobook TAFs, assigning and reserving Tonies (also when queuing; including refusals and that nothing changes then), starting with only one source, both languages, cleanup on errors, path escapes, security headers, and that **no secret appears in the log or UI**. Passwords in tests and mocks are made up.
 
 ## Security
 
