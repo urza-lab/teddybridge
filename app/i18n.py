@@ -107,6 +107,7 @@ EN = {
     "Auftrag nicht gefunden": "job not found",
     "Auftrag ist schon abgeschlossen – bitte direkt zuweisen": "job already finished – please assign directly",
     "„{name}“ ist schon für „{title}“ vorgemerkt": "“{name}” is already reserved for “{title}”",
+    "Tonie vormerken geht nur bei einem einzelnen Auftrag": "a Tonie can only be reserved for a single job",
     "keine TAF gefunden": "no TAF found",
     "Tonie „{name}“ zugewiesen (vorher: {old})": "Tonie “{name}” assigned (before: {old})",
     "Original-Inhalt": "original content",

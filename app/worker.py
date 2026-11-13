@@ -71,6 +71,10 @@ def find_marker(tc, base, short, max_depth=6):
     return out
 
 
+class Reserved(Exception):
+    """Die Figur ist schon bei einem anderen offenen Auftrag vorgemerkt (Text = dessen Titel)."""
+
+
 def markers(names):
     """Kennzeichen aus TAF-Namen: 'abcd1234' (ganzes Hörspiel) bzw. 'abcd1234-2' (Teil 2)."""
     out = set()
@@ -406,7 +410,7 @@ class Queue:
 
     # ---------- öffentliche API
 
-    def submit(self, items, subfolder=None, bundle=None, chapter_min=0):
+    def submit(self, items, subfolder=None, bundle=None, chapter_min=0, tonie=None):
         """bundle: Name einer Sammel-TAF – dann werden alle items (in dieser Reihenfolge) zu *einer* TAF.
         chapter_min: Dateien ohne Kapitelmarken bekommen etwa alle so viele Minuten ein Kapitel (0 = aus)."""
         sub = clean_folder(subfolder) if subfolder else None
@@ -416,6 +420,11 @@ class Queue:
             items = [{"id": "bundle", "title": bundle, "source": "mix", "kind": "bundle", "items": list(items),
                       "mark": "k" + hashlib.sha1(key.encode()).hexdigest()[:7]}]  # 'k' kommt in Hex nie vor
         with self.lock:
+            if tonie:  # tonie: gleich vormerken (nur bei genau einem Auftrag; main prüft das)
+                other = next((j for j in self.jobs.values() if j["state"] not in FINAL
+                              and (j.get("tonie") or {}).get("ruid") == tonie["ruid"]), None)
+                if other:
+                    raise Reserved(other["title"])
             bid = next(self.ids)
             jids = []
             for it in items:
@@ -431,7 +440,7 @@ class Queue:
                     "parts_min": int(it.get("parts_min") or 0), "chapter_min": int(chapter_min or 0),
                     "folder": f"{self.cfg.tc_base}/{sub}" if sub else None,
                     "state": "waiting", "n": 0, "m": 0, "part": 0, "parts": 0, "error": None,
-                    "taf": None, "tafs": [], "tonie": None, "tonie_result": None, "tonie_ok": None, "check": None, "warning": None, "note": None,
+                    "taf": None, "tafs": [], "tonie": dict(tonie) if tonie else None, "tonie_result": None, "tonie_ok": None, "check": None, "warning": None, "note": None,
                     "secs": None, "eta": None, "pct": None, "created": time.time(), "finished": None,
                     "lang": i18n.get(),  # Sprache der Meldungen/Ordnernamen: die der Anfrage beim Einreihen
                 }

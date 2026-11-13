@@ -22,7 +22,7 @@ from . import __version__, config, i18n, pwhash, setupcore
 from .i18n import t
 from .clients import Abs, ApiError, Nd, Tc, check_id
 from .fs import Fs
-from .worker import FINAL, MAX_FILES, Queue, clean_folder, id8, markers, scan_tree, series_list, series_seq
+from .worker import FINAL, MAX_FILES, MARKER, Queue, Reserved, clean_folder, id8, scan_paths, series_list, series_seq
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)  # loggt sonst volle URLs
@@ -629,16 +629,28 @@ def fs_cover(lib: str, item_id: str):
     return Response(res[0], media_type=res[1], headers={"Cache-Control": "private, max-age=3600"})
 
 
-_present = {"t": 0, "ids": []}
+_present = {"t": 0, "ids": [], "tafs": {}}
 
 
 @app.get("/api/present")
 def present():
-    """id8-Kennzeichen aller TAFs unterhalb des Basisordners (kurz gecacht)."""
+    """id8-Kennzeichen aller TAFs unterhalb des Basisordners (kurz gecacht), dazu je Kennzeichen die Pfade
+    (relativ zur Bibliothek; ganze TAF zuerst, Teile nach Nummer) für „Tonie zuweisen“ an der Kachel."""
     if time.time() - _present["t"] > 20 or QUEUE.changed > _present["t"]:
-        ids = {m.split("-")[0] for b in CFG.tc_scan_bases for m in markers(scan_tree(TC, b))}
-        _present.update(t=time.time(), ids=sorted(ids))
-    return {"base": CFG.tc_base, "ids": _present["ids"]}
+        hits = {}
+        for b in CFG.tc_scan_bases:
+            for d, n in scan_paths(TC, b):
+                m = MARKER.search(n)
+                if m:
+                    hits.setdefault(m.group(1), []).append((b != CFG.tc_base, int(m.group(2) or 0), f"{d}/{n}"))
+        tafs = {k: [p for *_, p in sorted(v)] for k, v in hits.items()}
+        _present.update(t=time.time(), ids=sorted(tafs), tafs=tafs)
+    return {"base": CFG.tc_base, "ids": _present["ids"], "tafs": _present["tafs"]}
+
+
+class ReserveRequest(BaseModel):
+    ruid: str | None = Field(None, pattern=r"^[0-9a-f]{16}$")  # None = Vormerkung entfernen
+    expect: str = Field("", max_length=2000)
 
 
 class JobItem(BaseModel):
@@ -658,6 +670,7 @@ class JobRequest(BaseModel):
     items: list[JobItem] = Field(min_length=1, max_length=500)
     bundle: str | None = Field(None, max_length=120)  # Name einer Sammel-TAF: alle items in *eine* TAF
     chapter_min: int = Field(0, ge=0, le=120)  # Dateien ohne Kapitelmarken: etwa alle n min ein Kapitel (0 = aus)
+    tonie: ReserveRequest | None = None  # gleich beim Einreihen vormerken (nur bei genau einem Auftrag)
 
 
 @app.post("/api/jobs")
@@ -706,7 +719,22 @@ def submit(req: JobRequest):
     sub = (req.subfolder or "").strip() or None
     if sub:
         clean_folder(sub)
-    bid = QUEUE.submit([i.model_dump() for i in req.items], sub, bundle=bundle, chapter_min=req.chapter_min)
+    tonie = None
+    if req.tonie and req.tonie.ruid:
+        if len(req.items) != 1 and bundle is None:
+            raise HTTPException(422, t("Tonie vormerken geht nur bei einem einzelnen Auftrag"))
+        try:
+            cur = _current(req.tonie.ruid, req.tonie.expect)
+        except AssignError as e:
+            raise HTTPException(e.status, str(e)) from None
+        tonie = {"ruid": req.tonie.ruid, "name": cur["name"], "expect": cur["source"]}
+    try:
+        bid = QUEUE.submit([i.model_dump() for i in req.items], sub, bundle=bundle, chapter_min=req.chapter_min,
+                           tonie=tonie)
+    except Reserved as e:
+        raise HTTPException(409, t("„{name}“ ist schon für „{title}“ vorgemerkt", name=tonie["name"], title=str(e))) from None
+    if tonie:
+        log.info("Stapel %s: Tonie %s (%s) vorgemerkt", bid, tonie["ruid"], tonie["name"])
     return {"batch": bid}
 
 
@@ -841,11 +869,6 @@ def tonie_assign(req: AssignRequest):
         return {"ok": True, **assign_tonie(req.ruid, req.path.strip(), req.expect)}
     except AssignError as e:
         raise HTTPException(e.status, str(e)) from None
-
-
-class ReserveRequest(BaseModel):
-    ruid: str | None = Field(None, pattern=r"^[0-9a-f]{16}$")  # None = Vormerkung entfernen
-    expect: str = Field("", max_length=2000)
 
 
 @app.post("/api/jobs/{jid}/tonie")

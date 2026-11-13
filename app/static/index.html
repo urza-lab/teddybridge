@@ -117,11 +117,15 @@ dialog::backdrop{background:var(--shade)}
 .hint{color:var(--mut);font-size:13px;margin:4px 0 0}
 .sw{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line)}
 .sw input[type=checkbox]{min-height:0;width:22px;height:22px;margin:2px 0 0;flex:none;accent-color:var(--acc)}
-.sw .txt{flex:1}
+.sw .txt{flex:1;min-width:0}
 .sw .txt b{display:block;font-weight:600}
+.sw .ti{width:22px;flex:none;font-size:18px;line-height:22px;text-align:center}
+.sw>button{flex:none;align-self:center}
+.pick{font-weight:600;color:var(--acc);min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile .tn{margin-top:6px}
 details.adv{border-top:1px solid var(--line);margin-top:4px}
 details.adv summary{padding:12px 0;cursor:pointer;font-weight:600;color:var(--mut)}
-.inl{display:flex;align-items:center;gap:8px;margin-top:6px}
+.inl{display:flex;align-items:center;gap:8px;margin-top:6px;min-width:0}
 .inl input{width:5.5em}
 ol.list{margin:0 0 14px;padding:0;list-style:none;border:1px solid var(--line);border-radius:12px;overflow:hidden}
 ol.list li{display:flex;align-items:center;gap:8px;padding:6px 6px 6px 12px;border-top:1px solid var(--line)}
@@ -261,6 +265,9 @@ ol.list li button{min-width:36px;min-height:36px;padding:0}
     <label class="sw" id="bundleWrap" hidden><input type="checkbox" id="bundle"><span class="txt"><b>Als eine TAF</b>
       <span class="hint">Alle ausgewählten Hörbücher nacheinander in eine einzige TAF, in der Reihenfolge der Liste oben.</span>
       <input id="bundleName" spellcheck="false" placeholder="Name der TAF" maxlength="120" hidden style="width:100%;margin-top:8px"></span></label>
+    <div class="sw" id="tonieRow"><span class="ti" aria-hidden="true">🧸</span><span class="txt"><b>Tonie danach zuweisen</b>
+      <span class="hint" id="tonieRowHint">Optional: Die TAF spielt auf dieser Figur, sobald sie fertig ist (bei Teilen: Teil 1).</span>
+      <span class="inl"><span id="tonieRowName" class="pick" hidden></span><button id="tonieRowBtn">Figur wählen</button><button id="tonieRowX" class="icon" aria-label="Vormerkung entfernen" hidden>✕</button></span></span></div>
     <details class="adv" id="adv"><summary>Erweitert</summary>
       <label class="sw" id="partsWrap"><input type="checkbox" id="parts"><span class="txt"><b>In Teile à 60 min</b>
         <span class="hint">Lange Hörbücher in mehrere TAFs von etwa 60 min aufteilen („Teil 01 von 12“), geschnitten an Datei- bzw. Kapitelgrenzen. Unter ca. 90 min bleibt es eine TAF.</span></span></label>
@@ -309,6 +316,7 @@ ol.list li button{min-width:36px;min-height:36px;padding:0}
   <div class="sb">
     <div id="tonieChoose">
       <p class="src" id="tonieFile"></p>
+      <div class="field" id="tonieWhichW" hidden><label for="tonieWhich">Welche TAF?</label><select id="tonieWhich"></select></div>
       <input id="tonieQ" type="search" placeholder="Figur suchen…" aria-label="Figur suchen">
       <ul id="tonieList"></ul>
     </div>
@@ -379,7 +387,9 @@ const EN = {
   'Bitte Unterordner angeben.':'Please enter a subfolder.', 'Bitte einen Namen für die TAF angeben.':'Please enter a name for the TAF.',
   'Nichts zu übertragen.':'Nothing to transfer.', '{n} Aufträge in der Warteschlange':'{n} jobs queued', 'In der Warteschlange: {t}':'Queued: {t}',
   '{t} – {n} Dateien → 1 TAF mit {max} Kapiteln oder {p} Teile':'{t} – {n} files → 1 TAF with {max} chapters or {p} parts',
-  'Tonie zuweisen':'Assign to Tonie', 'Figur suchen…':'Search figure…', 'Zurück':'Back', 'Zuweisen':'Assign',
+  'Tonie zuweisen':'Assign to Tonie', 'Tonie danach zuweisen':'Assign to a Tonie afterwards', 'Figur wählen':'Choose figure', '🧸 Tonie':'🧸 Tonie',
+  'Optional: Die TAF spielt auf dieser Figur, sobald sie fertig ist (bei Teilen: Teil 1).':'Optional: the figure plays the TAF as soon as it is finished (if split: part 1).',
+  'Welche TAF?':'Which TAF?', 'Übernehmen':'Use', 'Vormerken':'Reserve', '„{title}“, sobald fertig':'“{title}” once finished', 'Figur suchen…':'Search figure…', 'Zurück':'Back', 'Zuweisen':'Assign',
   'spielt bisher:':'currently plays:', 'neu:':'new:', 'Original-Inhalt (Tonie)':'original content (Tonie)',
   'Die bisherige Belegung wird ersetzt (wie in TeddyCloud: zusätzlich „keine Cloud“ an, „live“ aus). Die Box übernimmt das beim nächsten Auflegen.':'The current assignment is replaced (as in TeddyCloud: also “no cloud” on, “live” off). The box picks it up the next time the figure is placed.',
   'Figuren laden …':'Loading figures …', 'Keine Figuren gefunden.':'No figures found.', 'bereits zugewiesen':'already assigned',
@@ -635,6 +645,13 @@ function markTiles(){
     let b=t.querySelector('.badge:not(.warn)');
     if(has||q){ if(!b){b=el('span','badge'); t.append(b);} b.textContent=has?'✓ '+T('in TC'):'⏳ '+T('in Arbeit'); b.classList.toggle('q',q); }
     else if(b) b.remove();
+    // „in TC“: Tonie direkt an der Kachel zuweisen
+    const paths=has&&!st.readonly&&st.tafs?st.tafs[t.dataset.mark]:null;
+    let tb=t.querySelector('.tn');
+    if(paths&&paths.length){
+      if(!tb){ tb=el('button','tr tn',T('🧸 Tonie')); tb.setAttribute('aria-label',T('Tonie zuweisen')); t.querySelector('.meta').append(tb); }
+      tb.onclick=e=>{ e.stopPropagation(); openTonie(st.tafs[t.dataset.mark]); };
+    } else if(tb) tb.remove();
   }
   const n=st.sel.size, bundle=n>=2&&$('#bundle').checked;
   $('#selBar').hidden=!n||st.readonly;
@@ -642,6 +659,7 @@ function markTiles(){
   $('#selDur').textContent=dur([...st.sel.values()].reduce((a,it)=>a+(it.duration||0),0));
   $('#bundleWrap').hidden=n<2; $('#bundleName').hidden=!bundle; $('#partsWrap').hidden=bundle;
   $('#send').textContent=bundle?T('Als eine TAF ({n})',{n}):T('Übertragen ({n})',{n});
+  $('#tonieRow').hidden=st.readonly||!(n===1||bundle); renderTonieRow();
   const order=[...st.sel.keys()];  // Reihenfolge der Sammel-TAF = Reihenfolge der Auswahl
   for(const t of document.querySelectorAll('.tile[data-id]')){
     const c=t.querySelector('.check'); if(!c) continue;
@@ -722,7 +740,7 @@ async function sendMix(){
 function toggle(it){ st.sel.has(it.id)?st.sel.delete(it.id):st.sel.set(it.id,{...it,source:st.src,lib:st.lib}); markTiles(); }
 
 async function refreshPresent(){
-  try{ const d=await api('/api/present'); st.present=new Set(d.ids); }
+  try{ const d=await api('/api/present'); st.present=new Set(d.ids); st.tafs=d.tafs||{}; }
   catch(e){ msg(e.message); }
   if($('#onlyNew').checked) render(); else markTiles();
 }
@@ -753,6 +771,17 @@ function renderSelList(){
     li.append(x); ol.append(li);
   });
 }
+// Tonie gleich beim Übertragen vormerken (nur wenn genau ein Auftrag entsteht)
+const selKey=()=>[...st.sel.keys()].sort().join('|');
+function renderTonieRow(){
+  if(st.sendTonie&&st.sendTonie.key!==selKey()) st.sendTonie=null;  // andere Auswahl: Vormerkung verwerfen
+  const x=st.sendTonie;
+  $('#tonieRowName').hidden=$('#tonieRowX').hidden=!x; $('#tonieRowHint').hidden=!!x; $('#tonieRowBtn').textContent=x?T('ändern'):T('Figur wählen');
+  if(x) $('#tonieRowName').textContent=x.name;
+}
+function sendTitle(){ const b=st.sel.size>=2&&$('#bundle').checked; return b?($('#bundleName').value.trim()||T('Name der TAF')):([...st.sel.values()][0]||{}).title||''; }
+$('#tonieRowBtn').onclick=()=>openTonie(null, null, x=>{ st.sendTonie={...x,key:selKey()}; renderTonieRow(); });
+$('#tonieRowX').onclick=()=>{ st.sendTonie=null; renderTonieRow(); };
 function openSend(){
   $('#sendMsg').hidden=true; $('#send').disabled=st.readonly;
   $('#adv').open=$('#parts').checked||!!$('#chapMin').value.trim();
@@ -780,8 +809,11 @@ async function send(){
     if(!items.length) return sendErr(T('Nichts zu übertragen.'));
   }
   items=items.map(it=>({id:it.id,title:it.title,source:it.source,kind:it.kind,lib:(it.source==='nd'||it.source==='fs')?String(it.lib):null,split:split&&it.files>st.max,merge:merge&&it.files>st.max,parts_min:parts?60:0}));
+  const one=bundle||items.length===1;
+  const tonie=one&&st.sendTonie?{ruid:st.sendTonie.ruid,expect:st.sendTonie.expect}:null;
   $('#send').disabled=true;
-  try{ await post('/api/jobs',{subfolder,items,bundle,chapter_min});
+  try{ await post('/api/jobs',{subfolder,items,bundle,chapter_min,tonie});
+       if(tonie) st.sendTonie=null;
        $('#sendSheet').close();
        msg(bundle?T('In der Warteschlange: {t}',{t:bundle}):items.length>1?T('{n} Aufträge in der Warteschlange',{n:items.length}):T('In der Warteschlange: {t}',{t:items[0].title}), true);
        $('#bundle').checked=false; $('#bundleName').value=''; st.sel.clear(); markTiles(); poll(); }
@@ -791,11 +823,22 @@ async function send(){
 
 function partNo(p){ const m=/\[[^\[\]\/]{8}-(\d{1,2})\]\.taf$/i.exec(p); return m?Number(m[1]):0; }
 function srcLabel(s){ return !s ? T('Original-Inhalt (Tonie)') : s.startsWith('lib://') ? s.slice(6) : s; }
-const tn={path:null, job:null, list:[], pick:null};
-function tnTarget(){ return tn.job ? T('„{title}“, sobald fertig (bei Teilen: Teil 1)',{title:tn.job.title}) : tn.path; }
+const tn={path:null, job:null, list:[], pick:null, cb:null};
+function tnTarget(){ return tn.cb ? T('„{title}“, sobald fertig',{title:sendTitle()}) : tn.job ? T('„{title}“, sobald fertig (bei Teilen: Teil 1)',{title:tn.job.title}) : tn.path; }
+function tafLabel(p, all){
+  const k=partNo(p), dirs=new Set(all.map(x=>x.slice(0,x.lastIndexOf('/'))));
+  return (k?T('Teil {k}',{k}):p.split('/').pop())+(dirs.size>1?' – '+p.slice(0,p.lastIndexOf('/')):'');
+}
 function tonieStep(confirm){ $('#tonieChoose').hidden=confirm; $('#tonieConfirm').hidden=!confirm; $('#tcBtns').hidden=!confirm; }
-async function openTonie(path, job){
-  tn.path=path; tn.job=job||null; tn.pick=null; $('#tonieFile').textContent=tnTarget(); $('#tonieQ').value=''; $('#tonieMsg').textContent='';
+// path: TAF-Pfad oder Liste (Teile/Duplikate, Auswahl im Blatt); job: vormerken; cb: nur auswählen (Übertragen-Blatt)
+async function openTonie(path, job, cb){
+  const paths=Array.isArray(path)?path:path?[path]:[];
+  tn.path=paths[0]||null; tn.job=job||null; tn.cb=cb||null; tn.pick=null; $('#tonieQ').value=''; $('#tonieMsg').textContent='';
+  const w=$('#tonieWhich'); w.replaceChildren(); $('#tonieWhichW').hidden=paths.length<2;
+  for(const p of paths){ const o=el('option',null,tafLabel(p,paths)); o.value=p; w.append(o); }
+  w.onchange=()=>{ tn.path=w.value; $('#tonieFile').textContent=tnTarget(); renderTonies(); };
+  $('#tonieFile').textContent=tnTarget(); $('#tonieFile').hidden=paths.length>1;
+  $('#tcOk').textContent=T(cb?'Übernehmen':job?'Vormerken':'Zuweisen');
   tonieStep(false); $('#tonieList').replaceChildren(el('li',null,T('Figuren laden …')));
   $('#tonie').showModal();
   try{ tn.list=(await api('/api/tonies')).tonies; renderTonies(); }
@@ -821,6 +864,7 @@ function renderTonies(){
 async function assignTonie(){
   const x=tn.pick; if(!x) return; $('#tcOk').disabled=true; $('#tonieMsg').textContent='';
   try{
+    if(tn.cb){ tn.cb({ruid:x.ruid,name:x.name,expect:x.source}); $('#tonie').close(); return; }
     if(tn.job){
       await post('/api/jobs/'+tn.job.id+'/tonie',{ruid:x.ruid,expect:x.source});
       $('#tonie').close(); msg(T('„{name}“ vorgemerkt für „{title}“',{name:x.name,title:tn.job.title}), true); poll(); return;

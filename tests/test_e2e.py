@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -338,7 +339,7 @@ print("RESULT" + json.dumps(out))
         r = c.get(f"/api/cover/{A}")
         check(r.status_code == 200 and r.headers["content-type"] == "image/png" and r.content[:4] == b"\x89PNG", "Cover über Backend")
         check(c.get("/api/cover/..%2F..%2Fetc").status_code in (404, 422, 502), "Cover-ID wird validiert")
-        check(c.get("/api/present").json() == {"base": BASE, "ids": []}, "Status bei leerer Bibliothek")
+        check(c.get("/api/present").json() == {"base": BASE, "ids": [], "tafs": {}}, "Status bei leerer Bibliothek")
         check(c.post("/api/jobs", json={"subfolder": "../x", "items": [{"id": A}]}).status_code == 502, "'..' im Unterordner abgelehnt")
         check(c.post("/api/jobs", json={"subfolder": "x/_src_1", "items": [{"id": A}]}).status_code == 502, "_src_ als Unterordner abgelehnt")
 
@@ -515,6 +516,32 @@ print("RESULT" + json.dumps(out))
         check(r.status_code == 409 and "abgeschlossen" in r.json()["detail"], "abgeschlossener Auftrag: nicht mehr vormerken")
         disc = [m["content"] for m in httpx.get(f"{mock}/_mock/discord").json() if "Füllmaterial 07" in m.get("content", "")]
         check(disc and "🧸" in disc[-1], "Discord-Meldung nennt die Zuweisung")
+
+        print("Tonie gleich beim Einreihen vormerken, TAF-Pfade für die Kacheln")
+        c.post("/api/jobs/clear")
+        pr = c.get("/api/present").json()
+        m1 = re.search(r"\[([^\[\]/]{8})-\d+\]\.taf$", part1).group(1)
+        check(part1 in pr["tafs"].get(m1, []) and set(pr["tafs"]) == set(pr["ids"]), "present: Pfade je Kennzeichen")
+        check(pr["tafs"][m1] == sorted(pr["tafs"][m1], key=lambda x: int(re.search(r"-(\d+)\]\.taf$", x).group(1))),
+              "present: Teile nach Nummer sortiert")
+        F9, F10 = "f0090000-0000-4000-8000-000000000109", "f0100000-0000-4000-8000-000000000110"
+        cur = c.get("/api/tonies").json()["tonies"][0]["source"]
+        n0 = len(c.get("/api/jobs").json())
+        r = c.post("/api/jobs", json={"items": [{"id": F9}, {"id": F10}], "tonie": {"ruid": bobo, "expect": cur}})
+        check(r.status_code == 422, "vormerken bei zwei Aufträgen: abgelehnt")
+        r = c.post("/api/jobs", json={"items": [{"id": F9}], "tonie": {"ruid": bobo, "expect": "falsch"}})
+        check(r.status_code == 409 and len(c.get("/api/jobs").json()) == n0, "veraltete Belegung: abgelehnt, nichts eingereiht")
+        httpx.post(f"{mock}/_mock/encode-delay", json={"secs": 2})
+        r = c.post("/api/jobs", json={"items": [{"id": F9}], "tonie": {"ruid": bobo, "expect": cur}})
+        check(r.status_code == 200, f"F9 mit Tonie eingereiht {r.text[:150]}")
+        r = c.post("/api/jobs", json={"items": [{"id": F10}], "tonie": {"ruid": bobo, "expect": cur}})
+        check(r.status_code == 409 and "vorgemerkt" in r.json()["detail"] and len(c.get("/api/jobs").json()) == 1,
+              "dieselbe Figur beim nächsten Einreihen: abgelehnt, nichts eingereiht")
+        j9 = wait_jobs(c, 1)[0]
+        httpx.post(f"{mock}/_mock/encode-delay", json={"secs": 0.2})
+        mt = httpx.get(f"{mock}/_mock/tags").json()
+        check(j9["state"] == "done" and j9["tonie_ok"] is True and mt["tags"][bobo]["source"] == "lib://" + j9["tafs"][0],
+              f"F9 fertig -> Bobo zugewiesen ({j9.get('tonie_result')})")
         c.post("/api/jobs/clear")
         os.remove(os.path.join(lib, umlaut)), os.remove(os.path.join(lib, lang)), os.remove(os.path.join(lib, "fremd.taf"))
         shutil.rmtree(os.path.join(lib, BASE, "y" * 100))
@@ -544,10 +571,10 @@ print("RESULT" + json.dumps(out))
               f"Summe nur bei Stapeln mit mehreren Aufträgen {[m for m in msgs if m.startswith('📦')]}")
         ok_msgs = [m for m in msgs if m.startswith("✅")]
         err_msgs = [m for m in msgs if m.startswith("❌")]
-        check(len(ok_msgs) == 10 and all("Kapitel" in m and "📁 " + BASE in m for m in ok_msgs),
+        check(len(ok_msgs) == 11 and all("Kapitel" in m and "📁 " + BASE in m for m in ok_msgs),
               f"pro fertigem Auftrag eine Meldung mit Kapiteln/Dauer und Ordner ({len(ok_msgs)})")
         check(len(err_msgs) == 3 and all("fehlgeschlagen:" in m for m in err_msgs), f"pro Fehler eine Meldung mit Grund ({len(err_msgs)})")
-        check(len(msgs) == 16, f"übersprungene ohne eigene Meldung (insgesamt {len(msgs)})")
+        check(len(msgs) == 17, f"übersprungene ohne eigene Meldung (insgesamt {len(msgs)})")
         check(all(m.get("allowed_mentions") == {"parse": []} for m in raw), "keine @-Erwähnungen aus Titeln")
 
         print("Leere Uploads")
