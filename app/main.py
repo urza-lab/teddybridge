@@ -184,18 +184,25 @@ LANG_COOKIE = "tb_lang"
 
 
 def req_lang(request):
-    """Sprache einer Anfrage: UI_LANG (fest) > Cookie (Auswahl in der Oberfläche) > Accept-Language > Standard."""
-    return (CFG.ui_lang or i18n.norm(request.cookies.get(LANG_COOKIE))
+    """Sprache einer Anfrage: UI_LANG (fest) > ?lang= (vom TeddyCloud-Plugin: Sprache von TeddyCloud) > Cookie
+    (Auswahl in der Oberfläche) > Accept-Language > Standard."""
+    return (CFG.ui_lang or i18n.norm(request.query_params.get("lang")) or i18n.norm(request.cookies.get(LANG_COOKIE))
             or i18n.from_accept(request.headers.get("accept-language")) or i18n.DEFAULT)
 
 
 @app.middleware("http")  # zuletzt registriert = äusserste Schicht: gilt auch für 401 aus require_login
 async def language(request: Request, call_next):
-    token = i18n.set(req_lang(request))
+    lang = req_lang(request)
+    token = i18n.set(lang)
     try:
-        return await call_next(request)
+        resp = await call_next(request)
     finally:
         i18n.reset(token)
+    # ?lang= merken, damit auch die API-Aufrufe der Seite (Meldungen, Aufträge) diese Sprache nutzen
+    if not CFG.ui_lang and i18n.norm(request.query_params.get("lang")) and request.cookies.get(LANG_COOKIE) != lang:
+        resp.set_cookie(LANG_COOKIE, lang, max_age=31536000, samesite="strict", path="/",
+                        secure=request.url.scheme == "https")
+    return resp
 
 
 _PAGES = {}

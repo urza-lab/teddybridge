@@ -50,7 +50,19 @@
   const GRACE = 800;  // ms after the frame loaded to wait for teddybridge's "ready" message
   const MAXWAIT = 10000; // ms until giving up on the frame (address unreachable)
 
-  const de = /^de\b/i.test(navigator.language || '');
+  // Language of TeddyCloud, so that teddybridge and these texts match it: web v2 sets <html lang>, web v1 keeps
+  // the choice in localStorage (i18next, with a per-user prefix when TeddyCloud has a login). Fallback: browser.
+  function tcLang() {
+    try {
+      const fe = window.frameElement;
+      if (fe && fe.classList.contains('plugin-frame')) return parent.document.documentElement.lang || null;
+      const keys = Object.keys(localStorage).filter(k => k === 'i18nextLng' || /^user:.*:i18nextLng$/.test(k));
+      const vals = [...new Set(keys.map(k => localStorage.getItem(k)))];
+      return vals.length === 1 ? vals[0] : localStorage.getItem('i18nextLng');
+    } catch (e) { return null; }
+  }
+  const LANG = (/^(de|en)/i.exec(tcLang() || navigator.language || '') || [])[1];
+  const de = (LANG || '').toLowerCase() === 'de';
   const L = de ? {
     opening: 'teddybridge öffnet sich …', open: 'teddybridge öffnen', fallback: 'Falls nichts passiert:',
     tab: 'in neuem Tab öffnen', change: 'Adresse ändern', setupTitle: 'Adresse von teddybridge',
@@ -101,7 +113,10 @@
     frame.addEventListener('load', onLoad);
     waiting = setTimeout(fallback, MAXWAIT);
     const t = tcTheme();
-    frame.src = t ? url.split('#')[0] + '#theme=' + t : url;
+    const u = new URL(url);
+    if (LANG) u.searchParams.set('lang', LANG.toLowerCase());
+    if (t) u.hash = 'theme=' + t;
+    frame.src = u.href;
   }
   // Fill the visible height below the frame's top edge. TeddyCloud web v1 sizes the plugin frame to its content
   // (so the body gets the height); web v2 (class "plugin-frame") gives the frame a fixed height and shows a fixed

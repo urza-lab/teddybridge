@@ -387,7 +387,7 @@ const EN = {
   'Bitte Unterordner angeben.':'Please enter a subfolder.', 'Bitte einen Namen für die TAF angeben.':'Please enter a name for the TAF.',
   'Nichts zu übertragen.':'Nothing to transfer.', '{n} Aufträge in der Warteschlange':'{n} jobs queued', 'In der Warteschlange: {t}':'Queued: {t}',
   '{t} – {n} Dateien → 1 TAF mit {max} Kapiteln oder {p} Teile':'{t} – {n} files → 1 TAF with {max} chapters or {p} parts',
-  'Tonie zuweisen':'Assign to Tonie', 'Tonie danach zuweisen':'Assign to a Tonie afterwards', 'Figur wählen':'Choose figure', '🧸 Tonie':'🧸 Tonie',
+  'Tonie zuweisen':'Assign to Tonie', 'Nach TeddyCloud':'To TeddyCloud', 'Figur suchen':'Search figure', 'Tonie danach zuweisen':'Assign to a Tonie afterwards', 'Figur wählen':'Choose figure', '🧸 Tonie':'🧸 Tonie',
   'Optional: Die TAF spielt auf dieser Figur, sobald sie fertig ist (bei Teilen: Teil 1).':'Optional: the figure plays the TAF as soon as it is finished (if split: part 1).',
   'Welche TAF?':'Which TAF?', 'Übernehmen':'Use', 'Vormerken':'Reserve', '„{title}“, sobald fertig':'“{title}” once finished', 'Figur suchen…':'Search figure…', 'Zurück':'Back', 'Zuweisen':'Assign',
   'spielt bisher:':'currently plays:', 'neu:':'new:', 'Original-Inhalt (Tonie)':'original content (Tonie)',
@@ -411,7 +411,7 @@ function translateDom(root){
 }
 function setLang(l){
   try{ document.cookie=`tb_lang=${l}; path=/; max-age=31536000; samesite=strict`; }catch(e){}
-  location.reload();
+  const u=new URL(location.href); u.searchParams.delete('lang'); location.replace(u.href);  // ?lang= vom Plugin hätte sonst Vorrang
 }
 const st = {mix:[], src:'abs', lib:null, libs:[], view:'all', page:0, total:0, items:[], sel:new Map(), present:new Set(), coll:null, q:'', max:99};
 const PAGE = 48;
